@@ -9,11 +9,13 @@ options(stringsAsFactors=FALSE)
 options(width=Sys.getenv('COLUMNS'))
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
-network.dir <- file.path(project.dir, 'networks', '140321-all-assoc')
+network.dir <- file.path(project.dir, 'networks', '140522-all-assoc')
 
-pred.tab.path <- file.path(network.dir, 'prediction-table.txt')
+pred.tab.path <- file.path(network.dir, 'modeling', 'prediction-table.txt')
 pred.tab <- read.delim(pred.tab.path, check.names=FALSE, row.names=1)
 
+pred.table <- log(pred.tab)
+plot(density(pred.table[,2]))
 
 cor.mat <- cor(pred.tab, method='spearman')
 cor.mat[lower.tri(cor.mat, diag=TRUE)] <- NA

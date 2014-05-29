@@ -24,8 +24,6 @@ for (feature.filename in feature.filenames) {
   cat(sprintf('Reading features for %s\n', doid_code))
   feature.path <- file.path(feature.dir, feature.filename)
   feature.df <- read.delim(feature.path, check.names=FALSE)
-  # Remove genes that appear multiple times. Upstream HGNC bug
-  feature.df <- feature.df[! duplicated(feature.df$source), ]
   feature.df.list[[doid_code]] <- feature.df
 }
 

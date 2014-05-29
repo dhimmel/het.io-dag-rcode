@@ -13,8 +13,10 @@ glmnet.alpha <- 0 # 0 for ridge regression
 
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
+network.id <- '140522-all-assoc-lessmsig'
+
 code.dir <- file.path(project.dir, 'rcode')
-network.dir <- file.path(project.dir, 'networks', '140321-all-assoc')
+network.dir <- file.path(project.dir, 'networks', network.id)
 feature.dir <- file.path(network.dir, 'features')
 graphics.dir <- file.path(network.dir, 'graphics')
 modeling.dir <- file.path(network.dir, 'modeling')
@@ -24,39 +26,48 @@ dir.create(modeling.dir, showWarnings=FALSE)
 dir.create(webdata.dir, showWarnings=FALSE)
 
 source(file.path(code.dir, 'machine-learning.R'))
-feature.filenames <- list.files(feature.dir, pattern='DOID_')
 
-feature.df.list <- list()
-for (feature.filename in feature.filenames) {
-  doid_code <- gsub('.txt.gz', '', feature.filename)
-  cat(sprintf('Reading features for %s\n', doid_code))
-  feature.path <- file.path(feature.dir, feature.filename)
-  feature.df <- read.delim(feature.path, check.names=FALSE)
-  # Remove genes that appear multiple times. Upstream HGNC bug
-  feature.df <- feature.df[! duplicated(feature.df$source), ]
-  colnames(feature.df)[colnames(feature.df) == 'source'] <- 'gene_symbol'
-  colnames(feature.df)[colnames(feature.df) == 'target'] <- 'disease_code'
-  colnames(feature.df)[colnames(feature.df) == 'target_name'] <- 'disease_name'
-  feature.df.list[[doid_code]] <- feature.df
+ReadFeatures <- function(feature.dir) {
+  # Read and combine the feature files in feature.dir with names beginning with 'DOID_'.
+  feature.filenames <- list.files(feature.dir, pattern='DOID_')
+  feature.df.list <- list()
+  for (feature.filename in feature.filenames) {
+    doid_code <- gsub('.txt.gz', '', feature.filename)
+    cat(sprintf('Reading features for %s\n', doid_code))
+    feature.path <- file.path(feature.dir, feature.filename)
+    feature.df <- read.delim(feature.path, check.names=FALSE)
+    feature.df.list[[doid_code]] <- feature.df
+  }
+  return(do.call(rbind, feature.df.list))
 }
 
-features.df <- do.call(rbind, feature.df.list)
-feature.names <- colnames(feature.df)[-(1:5)]
+features.df <- ReadFeatures(feature.dir)
+feature.names <- colnames(features.df)[-(1:8)]
+
+# Exclude redundant MSigDB features
+exclude.metanodes <- c('-C2.A-', '-C2.CP.A-', '-C3.A-', '-C4.A-', '-C5.A-')
+exclude.feature <- rowSums(sapply(exclude.metanodes, grepl, feature.names, fixed=TRUE)) == 0
+feature.names <- feature.names[exclude.feature]
+
+
 category.path <- file.path(project.dir, 'data-integration', 'disease-categories.txt')
 category.df <- read.delim(category.path)
 features.df$disease_category <- category.df[match(features.df$disease_code, category.df$doid_code), 'category']
 
+pathophys.path <- file.path(project.dir, 'data-integration', 'pathophysiology.txt')
+pathophys.df <- read.delim(pathophys.path)
+features.df$disease_pathophys <- category.df[match(features.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
 
 ################################################################################
 ## Training and Testing Partitioning
 
-train.df <- subset(features.df, part == 'train')
-test.df <- subset(features.df, part == 'test')
+train.df <- subset(features.df, part=='train' & status_int != -1)
+test.df <- subset(features.df, part=='test' & status_int != -1)
 
 X.train <- as.matrix(train.df[, feature.names])
 X.test <- as.matrix(test.df[, feature.names])
-y.train <- train.df$status
-y.test <- test.df$status
+y.train <- train.df$status_int
+y.test <- test.df$status_int
 
 doMC::registerDoMC(cores=7)
 set.seed(0)
@@ -80,7 +91,7 @@ write.table(round(vtm.test.df, 5), vtm.test.path, sep='\t', row.names=FALSE, quo
 
 
 # Testing Precision-Recall Curve
-prc.plot <- ggplot(vtm.test.df[nrow(vtm.part.df):1, ], aes(recall, precision, color=threshold)) + 
+prc.plot <- ggplot(vtm.test.df[nrow(vtm.test.df):1, ], aes(recall, precision, color=threshold)) + 
   geom_line(size=1, color='grey') + geom_point(size=1.5) + 
   theme_bw() + scale_color_gradientn(colours = rainbow(7)[1:6]) +
   theme(legend.justification=c(1, 1), legend.position=c(1, 1)) +
@@ -109,9 +120,13 @@ ggsave(roc.path, roc.plot, width=3, height=2.9)
 
 # Fit on whole data (global)
 X <- as.matrix(features.df[, feature.names])
-y <- features.df$status
+y <- features.df$status_int
+
+X.model <- as.matrix(subset(features.df, status_int != -1, select=feature.names))
+y.model <- subset(features.df, status_int != -1)[, 'status_int']
+
 set.seed(0)
-cv.ridge <- glmnet::cv.glmnet(X, y, family='binomial', 
+cv.ridge <- glmnet::cv.glmnet(X.model, y.model, family='binomial', 
   alpha=glmnet.alpha, standardize=TRUE, parallel=TRUE)
 # Save cv.glmnet object as an R data structure
 saveRDS(cv.ridge, file.path(modeling.dir, 'global-model.rds'))
@@ -142,11 +157,56 @@ prediction.df <- cbind(features.df, as.data.frame(XB.mat, check.names=FALSE))
 predictions.file <- gzfile(file.path(modeling.dir, 'predictions.txt.gz'), 'w')
 write.table(prediction.df, predictions.file, sep='\t', row.names=FALSE, quote=FALSE)
 close(predictions.file)
-vtm.global <- VariableThresholdMetrics(features.df$prediction, features.df$status)
+feat.perf.df <- subset(features.df, status_int != -1)
+vtm.global <- VariableThresholdMetrics(feat.perf.df$prediction, feat.perf.df$status_int)
 
 prediction.cast <- reshape2::dcast(features.df, gene_symbol ~ disease_name, value.var='prediction')
 predictions.cast.path <- file.path(modeling.dir, 'prediction-table.txt')
 write.table(prediction.cast, predictions.cast.path, sep='\t', row.names=FALSE, quote=FALSE)
+
+
+################################################################################
+## Performance by status type
+violin.plot <- ggplot(features.df, aes(status, prediction)) +
+  geom_violin() + coord_cartesian(ylim=c(0.0008, 0.01)) + 
+  scale_y_log10() + stat_summary(fun.y=mean, geom='point', color='darkgreen', size=3) +
+  theme_bw() + theme(axis.text.x=element_text(angle=45, hjust=1))
+ggsave(file.path(graphics.dir, 'prediction-violins.pdf'), violin.plot, width=4.5, height=5)
+
+
+################################################################################
+## Feature correlation plot
+HclustOrder <- function(feature.mat) {
+  # Returns the colnames, ordered by heirarchical clustering
+  cor.mat <- cor(feature.mat)
+  clust <- hclust(dist(cor.mat))
+  return(colnames(feature.mat)[clust$order])
+}
+
+features.sorted <- HclustOrder(X)
+cor.mat <- X[, features.sorted]
+cor.tri.mat <- cor(cor.mat)
+cor.tri.mat[lower.tri(cor.tri.mat, diag=TRUE)] <- NA
+cor.melt <- na.omit(as.data.frame(reshape2::melt(cor.tri.mat, varnames=c('x', 'y'), value.name='correlation')))
+
+diverging.cols <- c('#0000FF', '#f7eff7', '#FF0000') # blues
+cor.plot <- ggplot(cor.melt, aes(x, y, fill=correlation)) +
+  geom_tile(color='white') + 
+  scale_fill_gradientn(name=expression("Pearson's" * ~ rho), limits=c(-1, 1), colours=diverging.cols) + 
+  #scale_fill_gradient2(name=expression("Pearson's" * ~ rho), limits=c(-1, 1)) + 
+  scale_x_discrete(limits=features.sorted[-length(features.sorted)]) + 
+  scale_y_discrete(limits=rev(features.sorted[-1])) +
+  theme_bw() + theme(axis.text.x=element_text(angle=65, hjust=1)) +
+  xlab(NULL) + ylab(NULL) + coord_fixed() +
+  theme(plot.background=element_blank(), panel.grid.major=element_blank(),
+    panel.grid.minor=element_blank(), panel.border=element_blank(),
+    axis.line=element_line(color='black')) +
+  theme(legend.justification=c(1, 0), 
+    legend.position=c(1.0, 0.75), legend.direction='horizontal') +
+  guides(fill=guide_colorbar(barwidth=10, barheight=1, title.position='top', title.hjust=0.5))
+
+ggsave(file.path(graphics.dir, 'feature-correlations.pdf'), cor.plot, width=7, height=7)
+
 
 ################################################################################
 ## Disease Specific Predictions on global data set
@@ -166,30 +226,30 @@ OrderAurocDf <- function(auroc.df) {
 
 
 # Calculate disease specific AUCs from the global ridge model
-auroc.df1 <- plyr::ddply(features.df, c('disease_code'), plyr::summarize,
+auroc.df1 <- plyr::ddply(feat.perf.df, c('disease_code'), plyr::summarize,
   'breadth' = 'disease_specific',
   'type'='model', 'name'='ridge',
-  'auroc' = VariableThresholdMetrics(prediction, status)$auroc,
-  'positives'=sum(status))
+  'auroc' = VariableThresholdMetrics(prediction, status_int)$auroc,
+  'positives'=sum(status_int))
 auroc.df1 <- OrderAurocDf(auroc.df1)
 
 ComputeFeatureAUC <- function(feat.df) {
-  apply(feat.df[, feature.names], 2, function(x) VariableThresholdMetrics(x, feat.df$status)$auroc)
+  apply(feat.df[, feature.names], 2, function(x) VariableThresholdMetrics(x, feat.df$status_int)$auroc)
 }
 
 # Calculate global AUCs for each feature
-auroc.vec2 <- ComputeFeatureAUC(features.df)
+auroc.vec2 <- ComputeFeatureAUC(feat.perf.df)
 auroc.df2 <- data.frame(
   'feature'=names(auroc.vec2), 
   'auroc'=as.numeric(auroc.vec2),
   'type'='feature',
   'breadth'='global',
-  'positives'=sum(features.df$status)
+  'positives'=sum(feat.perf.df$status_int)
 )
 auroc.df2 <- OrderAurocDf(auroc.df2)
 
 # Calculate disease-specific AUROCs for each feature
-fXd.auroc.tab <- plyr::ddply(features.df, c('disease_code'), ComputeFeatureAUC)
+fXd.auroc.tab <- plyr::ddply(feat.perf.df, c('disease_code'), ComputeFeatureAUC)
 auroc.df3 <- reshape2::melt(fXd.auroc.tab, id.vars=c('disease_code'), variable.name='feature', value.name='auroc')
 auroc.df3 <- cbind(auroc.df3, 'type'='feature', 'breadth'='disease_specific')
 auroc.df3$positives <- category.df[match(auroc.df3$disease_code, category.df$doid_code), 'count']
@@ -197,13 +257,14 @@ auroc.df3 <- OrderAurocDf(auroc.df3)
 
 # Global AUC for Ridge Model
 auroc.df4 <- data.frame('breadth'='global', 'type'='model', 'name'='ridge',
-  'positives'=sum(features.df$status), 'auroc'=vtm.global$auroc)
+  'positives'=sum(feat.perf.df$status_int), 'auroc'=vtm.global$auroc)
 auroc.df4 <- OrderAurocDf(auroc.df4)
 
 # Combine
 auroc.df <- rbind(auroc.df1, auroc.df2, auroc.df3, auroc.df4)
 auroc.df$disease_name <- category.df[match(auroc.df$disease_code, category.df$doid_code), 'doid_name']
 auroc.df$disease_category <- category.df[match(auroc.df$disease_code, category.df$doid_code), 'category']
+auroc.df$disease_pathophys <- pathophys.df[match(auroc.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
 metric.metapath.mat <- do.call(rbind, strsplit(auroc.df$feature, '|', fixed=TRUE))
 auroc.df$metric <- metric.metapath.mat[, 1]
 auroc.df$metapath <- gsub('-', '', metric.metapath.mat[, 2])
@@ -233,9 +294,9 @@ auroc.df[is.msig.auc, 'name'] <- msig.nomen.df[match(auroc.df[is.msig.auc, 'meta
 
 MeanConfInt <- function(x) {t.test(x)$conf.int[1:2]}
 category.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00')
-
+pathophys.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00', 'black')
 ## MSigDB Plot
-msig.df <- subset(auroc.df, panel == 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature')# | panel == 'Model')
+msig.df <- subset(auroc.df, panel == 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature' | panel == 'Model')
 msig.disease.df <- subset(msig.df, breadth == 'disease_specific')
 msig.global.df <- subset(msig.df, breadth == 'global')
 # Order by global AUROC
@@ -248,7 +309,7 @@ set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) +
   geom_hline(aes(yintercept=0.5), color='red', linetype='dashed') +
   stat_summary(fun.y='MeanConfInt', geom='line', color='grey', size=9.5) +
   geom_point(data=msig.global.df, size=11.5, shape='-', color='#4C4C4C') + 
-  geom_point(aes(color=disease_category), position=position_jitter(width=0.28), alpha=0.7, size=2.5) + 
+  geom_point(aes(color=disease_pathophys), position=position_jitter(width=0.28), alpha=0.7, size=2.5) + 
   theme(plot.margin = grid::unit(c(0, 0, 0, 0), 'points')) + theme_bw() +
   theme(axis.text.x=element_text(angle=45, hjust=1)) + 
   xlab(NULL) + ylab('AUROC') +# guides(color=FALSE) +
@@ -256,7 +317,7 @@ set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) +
   #theme(legend.justification=c(0,1), legend.position=c(0, 1),
   #  legend.background=element_rect(color='grey60', size=0.25),
   #  legend.margin=grid::unit(1, 'points'), legend.direction='horizontal') +
-  scale_colour_manual(name='Disease Category', values=category.colors)
+  scale_colour_manual(name='Pathophysiology', values=pathophys.colors)
 msig.plot.path <- file.path(graphics.dir, 'AUROC-msig-plot.pdf')
 ggsave(msig.plot.path, msig.plot, width=6.83, height=4)
 
@@ -276,7 +337,7 @@ set.seed(0); nonmsig.plot <- ggplot(nonmsig.disease.df, aes(name, auroc)) +
   geom_hline(aes(yintercept=0.5), color='red', linetype='dashed') +
   stat_summary(fun.y='MeanConfInt', geom='line', color='grey', size=12) +
   geom_point(data=nonmsig.global.df, size=15, shape='-', color='#4C4C4C') + 
-  geom_point(aes(color=disease_category), position=position_jitter(width=0.3), alpha=0.7, size=2.5) + 
+  geom_point(aes(color=disease_pathophys), position=position_jitter(width=0.3), alpha=0.7, size=2.5) + 
   theme(plot.margin = grid::unit(c(0, 0, 0, 0), 'points')) + theme_bw() +
   theme(axis.text.x=element_text(angle=45, hjust=1)) + 
   xlab(NULL) + ylab('AUROC') + 
@@ -284,24 +345,17 @@ set.seed(0); nonmsig.plot <- ggplot(nonmsig.disease.df, aes(name, auroc)) +
   #theme(legend.justification=c(0,1), legend.position=c(0, 1),
   #  legend.background=element_rect(color='grey60', size=0.25),
   #  legend.margin=grid::unit(1, 'points'), legend.direction='horizontal') +
-  scale_colour_manual(name='Disease Category', values=category.colors)
+  scale_colour_manual(name='Pathophysiology', values=pathophys.colors)
 nonmsig.plot.path <- file.path(graphics.dir, 'AUROC-nomsig-plot.pdf')
 ggsave(nonmsig.plot.path, nonmsig.plot, width=6.83, height=4)
 
 
 ################################################################################
 # Webdata
-#https://stackoverflow.com/questions/5448545/how-to-retrieve-get-parameters-from-javascript
-#http://www.genenames.org/cgi-bin/gene_symbol_report?hgnc_id=1688
-#https://www.datatables.net/forums/discussion/5611/how-to-grab-datatables-data-from-a-google-spreadsheet/p1
 
-# https://code.google.com/p/jquery-csv/
-# $.csv.toArray()
-# http://datatables.net/ref#aaData
-
-hgnc.path <- '/home/dhimmels/Documents/serg/data-sources/hgnc/140205/protein-coding.txt'
-hgnc.df <- read.delim(hgnc.path)
-features.df$gene_code <- hgnc.df[match(features.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
+#hgnc.path <- '/home/dhimmels/Documents/serg/data-sources/hgnc/140205/protein-coding.txt'
+#hgnc.df <- read.delim(hgnc.path)
+#features.df$gene_code <- hgnc.df[match(features.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
 
 #################
 # Disease Summary Table

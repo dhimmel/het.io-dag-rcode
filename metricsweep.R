@@ -11,7 +11,7 @@ options(stringsAsFactors=FALSE)
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
 code.dir <- file.path(project.dir, 'rcode')
-directory <- file.path(project.dir, 'networks', '140313-metricsweep')
+directory <- file.path(project.dir, 'networks', '140518-metricsweep')
 
 source(file.path(code.dir, 'machine-learning.R'))
 # Using python processing
@@ -26,10 +26,11 @@ feature.path <- file.path(directory, 'features.txt.gz')
 feature.df <- read.delim(feature.path, check.names=FALSE, stringsAsFactors=FALSE)
 
 # Read partition file with master list of testing and training
+# Not needed because non-training pairs are not computed, left in for safety.
 partitions.path <- file.path(project.dir, 'partitions.txt.gz')
 part.df <- read.delim(partitions.path, colClasses='character')
 # Filter feature.df to only include training pairs
-training.pairs <- apply(part.df[part.df$part=='train', c('doid_code', 'gene')], 1, paste, collapse='|')
+training.pairs <- apply(part.df[part.df$part=='train', c('disease_code', 'gene_symbol')], 1, paste, collapse='|')
 feature.df.pairs <- apply(feature.df[, c('target', 'source')], 1, paste, collapse='|')
 feature.df <- feature.df[feature.df.pairs %in% training.pairs, ]
 
@@ -75,7 +76,7 @@ for (i in 1:repititions) {
       vtm <- VariableThresholdMetrics(y.predicted, y.test)
       metric.df.index <- metric.df$metric == metric & metric.df$fold == k & metric.df$repitition == i
       metric.df[metric.df.index, 'lambda'] <- lambda
-      metric.df[metric.df.index, 'auc'] <- vtm$auc
+      metric.df[metric.df.index, 'auc'] <- vtm$auroc
       # Precision-recall Curve
       #ggplot(vtm$prg, aes(recall, precision, color=threshold)) + 
       #  geom_line(size=2) + theme_bw() + scale_colour_gradientn(colours = rainbow(100))
@@ -108,6 +109,7 @@ ggplot(dwpc.plot.df, aes(dwpc_exponent, auc)) + theme_bw() +
   geom_vline(xintercept=threshold.dwpc, color='darkgreen', linetype='dashed') + 
   geom_rect(xmin=-Inf, xmax=Inf, ymin=npc.confint[1], ymax=npc.confint[2], fill='#7EC0EE') +
   geom_hline(yintercept=npc.mean, color='#42647F') +
+  #geom_point() +
   geom_smooth(linetype=0, method='loess', span=0.75, alpha=0.8) +
   stat_summary(fun.y='mean', geom='point') + 
   #theme(axis.text.x = element_text(angle=60, hjust=1)) +
