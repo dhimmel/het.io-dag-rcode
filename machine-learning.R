@@ -33,7 +33,15 @@ VariableThresholdMetrics <- function(score, status) {
     'precision'=ROCR::performance(rocr.pred, measure='prec')@y.values[[1]],
     'lift'=ROCR::performance(rocr.pred, measure='lift')@y.values[[1]]
   )
-  metrics <- list('auroc'=auroc, 'threshold.df'=threshold.df)
+
+  roc.df <- threshold.df[, c('fpr', 'recall')]
+  for (measure in c('fpr', 'recall')) {
+    not.dup <- ! duplicated(roc.df$recall)
+    not.dup <- not.dup | c(not.dup[-1], TRUE)
+    roc.df <- roc.df[not.dup, ]
+  }
+
+  metrics <- list('auroc'=auroc, 'threshold.df'=threshold.df, 'roc.df'=roc.df)
   return(metrics)
 }
 

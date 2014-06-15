@@ -26,20 +26,7 @@ dir.create(modeling.dir, showWarnings=FALSE)
 dir.create(webdata.dir, showWarnings=FALSE)
 
 source(file.path(code.dir, 'machine-learning.R'))
-
-ReadFeatures <- function(feature.dir) {
-  # Read and combine the feature files in feature.dir with names beginning with 'DOID_'.
-  feature.filenames <- list.files(feature.dir, pattern='DOID_')
-  feature.df.list <- list()
-  for (feature.filename in feature.filenames) {
-    doid_code <- gsub('.txt.gz', '', feature.filename)
-    cat(sprintf('Reading features for %s\n', doid_code))
-    feature.path <- file.path(feature.dir, feature.filename)
-    feature.df <- read.delim(feature.path, check.names=FALSE)
-    feature.df.list[[doid_code]] <- feature.df
-  }
-  return(do.call(rbind, feature.df.list))
-}
+source(file.path(code.dir, 'functions.R'))
 
 features.df <- ReadFeatures(feature.dir)
 feature.names <- colnames(features.df)[-(1:8)]
@@ -56,67 +43,10 @@ features.df$disease_category <- category.df[match(features.df$disease_code, cate
 
 pathophys.path <- file.path(project.dir, 'data-integration', 'pathophysiology.txt')
 pathophys.df <- read.delim(pathophys.path)
-features.df$disease_pathophys <- category.df[match(features.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+features.df$disease_pathophys <- pathophys.df[match(features.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
 
 ################################################################################
-## Training and Testing Partitioning
-
-train.df <- subset(features.df, part=='train' & status_int != -1)
-test.df <- subset(features.df, part=='test' & status_int != -1)
-
-X.train <- as.matrix(train.df[, feature.names])
-X.test <- as.matrix(test.df[, feature.names])
-y.train <- train.df$status_int
-y.test <- test.df$status_int
-
-doMC::registerDoMC(cores=7)
-set.seed(0)
-cv.ridge.train <- glmnet::cv.glmnet(X.train, y.train, family='binomial', 
-  alpha=glmnet.alpha, standardize=TRUE, parallel=TRUE)
-lambda.train <- cv.ridge.train$lambda.1se
-# Save cv.glmnet object as an R data structure
-saveRDS(cv.ridge.train, file.path(modeling.dir, 'training-model.rds'))
-#cv.ridge.train <- readRDS(file.path(network.dir, 'training-model.rds'))
-y.predicted.train <- as.numeric(predict(cv.ridge.train, s=lambda.train, newx=X.train, type='response'))
-y.predicted.test <- as.numeric(predict(cv.ridge.train, s=lambda.train, newx=X.test, type='response'))
-vtm.train <- VariableThresholdMetrics(y.predicted.train, y.train)
-vtm.test <- VariableThresholdMetrics(y.predicted.test, y.test)
-
-vtm.train.df <- vtm.train$threshold.df
-vtm.test.df <- vtm.test$threshold.df
-vtm.part.df <- rbind(cbind(vtm.train.df, 'part'='train'), cbind(vtm.test.df, 'part'='test'))
-
-vtm.test.path <- file.path(modeling.dir, 'variable-threshold-metrics-testing.txt')
-write.table(round(vtm.test.df, 5), vtm.test.path, sep='\t', row.names=FALSE, quote=FALSE)
-
-
-# Testing Precision-Recall Curve
-prc.plot <- ggplot(vtm.test.df[nrow(vtm.test.df):1, ], aes(recall, precision, color=threshold)) + 
-  geom_line(size=1, color='grey') + geom_point(size=1.5) + 
-  theme_bw() + scale_color_gradientn(colours = rainbow(7)[1:6]) +
-  theme(legend.justification=c(1, 1), legend.position=c(1, 1)) +
-  theme(legend.background = element_rect(linetype='solid', color='grey')) +
-  theme(plot.margin = grid::unit(c(2, 2, 2, 2), 'points')) +
-  guides(color=guide_colorbar(title='Predicted\nprobability\nthreshold')) +
-  xlab('Recall') + ylab('Precision')
-prc.path <- file.path(graphics.dir, 'prc-testing.pdf')
-ggsave(prc.path, prc.plot, width=5, height=3.5)
-
-# Testing ROC Curve
-roc.plot <- ggplot(vtm.part.df, aes(fpr, recall, linetype=part)) + 
-  geom_line() + theme_bw() + coord_fixed() +
-  scale_linetype_manual(values=c('solid', 'dashed'), 
-    name='Partition (AUC)', breaks=c('test', 'train'),
-    labels=c(sprintf('Testing (%.3f)', vtm.test$auroc), sprintf('Training (%.3f)', vtm.train$auroc))) +
-  theme(legend.justification=c(1,0), legend.position=c(1,0), legend.key=element_rect(linetype='blank')) +
-  theme(plot.margin = grid::unit(c(2, 2, 2, 2), 'points')) + 
-  theme(legend.background = element_rect(linetype='solid', color='grey')) +
-  xlab('False Positive Rate') + ylab('Recall')
-roc.path <- file.path(graphics.dir, 'roc-testing.pdf')
-ggsave(roc.path, roc.plot, width=3, height=2.9)
-
-################################################################################
-## Refit on all oberservations
+## Fit on all oberservations
 
 # Fit on whole data (global)
 X <- as.matrix(features.df[, feature.names])
@@ -125,6 +55,7 @@ y <- features.df$status_int
 X.model <- as.matrix(subset(features.df, status_int != -1, select=feature.names))
 y.model <- subset(features.df, status_int != -1)[, 'status_int']
 
+doMC::registerDoMC(cores=7)
 set.seed(0)
 cv.ridge <- glmnet::cv.glmnet(X.model, y.model, family='binomial', 
   alpha=glmnet.alpha, standardize=TRUE, parallel=TRUE)
@@ -136,16 +67,14 @@ lambda.global <- cv.ridge$lambda.1se
 # Make predictions using the global model
 ## Save coefficients
 coefs.global <- coef(cv.ridge, s=lambda.global)[, 1]
-zcoefs.global <- c(0, coefs.global[-1] * apply(X, 2, sd) / sd(y))
+zcoefs.global <- c(0, coefs.global[-1] * apply(X.model, 2, sd) / sd(y.model))
 feature.name.mat <- do.call(rbind, strsplit(feature.names, '[|]'))
 coef.df <- data.frame(
   'feature'=c('intercept', feature.names), 
   'metric'=c(NA, feature.name.mat[, 1]), 
   'metapath'=c(NA, feature.name.mat[, 2]),
-  'coef'=coefs.global,
-  'zcoef'=zcoefs.global, row.names=NULL)
-coef.path <- file.path(modeling.dir, 'coefs-global.txt')
-write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
+  'ridge_coef'=coefs.global,
+  'ridge_zcoef'=zcoefs.global, row.names=NULL)
 
 ## Save XB and make predictions
 XB.mat <- X %*% diag(coefs.global[-1])
@@ -166,6 +95,55 @@ write.table(prediction.cast, predictions.cast.path, sep='\t', row.names=FALSE, q
 
 
 ################################################################################
+## Parsimonious Models
+
+set.seed(0)
+cv.lasso <- glmnet::cv.glmnet(X.model, y.model, family='binomial', 
+  alpha=1, standardize=TRUE, parallel=TRUE)
+
+lasso.predicted <- as.numeric(predict(cv.ridge, s=cv.lasso$lambda.1se, newx=X.model, type='response'))
+lasso.vtm <- VariableThresholdMetrics(lasso.predicted, feat.perf.df$status_int)
+
+
+coef.df$lasso_coef <- coef(cv.lasso, s=cv.lasso$lambda.1se)[, 1]
+coef.df$lasso_zcoef <- c(0, coef.df$lasso_coef[-1] * apply(X.model, 2, sd) / sd(y.model))
+
+coef.path <- file.path(modeling.dir, 'coefs-global.txt')
+write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
+
+
+feature.desc.path <- file.path(project.dir, 'data-integration', 'feature-descriptions.txt')
+desc.df <- read.delim(feature.desc.path)
+
+feature.converter <- desc.df$easy_name
+names(feature.converter) <- desc.df$feature
+
+coef.df$neg_ridge_zcoef <- -coef.df$ridge_zcoef
+coef.melt <- reshape2::melt(subset(coef.df, feature != 'intercept'),
+  measure.vars=c('neg_ridge_zcoef', 'lasso_zcoef'))
+
+coef.melt.ridge <- subset(coef.melt, variable=='neg_ridge_zcoef')
+features.sorted <- coef.melt.ridge[order(coef.melt.ridge$value, decreasing=TRUE), 'feature']
+
+
+fill.red <- '#FB7C72'
+fill.blue <- '#7284FF'
+
+gg.zcoef <- ggplot(coef.melt, aes(x=feature, ymin=0, ymax=value, color=variable)) + 
+  theme_bw() + geom_hline(yintercept=0) + ylab('Standardized Coefficient') +
+  geom_linerange(stat='identity', size=5) + coord_flip() +
+  scale_x_discrete(limits=features.sorted, labels=feature.converter[features.sorted]) + 
+  scale_y_continuous(labels=abs, limits=c(-max(coef.melt$value), max(coef.melt$value))) +
+  scale_color_manual(name='Method (AUROC)', values=c(fill.red, fill.blue), 
+    labels=c(sprintf('ridge (%.3f)', vtm.global$auroc), sprintf('lasso (%.3f)', lasso.vtm$auroc))) +
+  theme(legend.key=element_rect(linetype='blank')) +
+  theme(axis.text.y=element_text(angle=30, hjust=1)) + xlab(NULL) +
+  theme(legend.justification=c(1,0), legend.position=c(1,0), 
+    legend.background=element_rect(color='grey60', size=0.25))
+ggsave(file.path(graphics.dir, 'coefficients.pdf'), gg.zcoef, width=4.5, height=5)
+
+
+################################################################################
 ## Performance by status type
 violin.plot <- ggplot(features.df, aes(status, prediction)) +
   geom_violin() + coord_cartesian(ylim=c(0.0008, 0.01)) + 
@@ -173,13 +151,44 @@ violin.plot <- ggplot(features.df, aes(status, prediction)) +
   theme_bw() + theme(axis.text.x=element_text(angle=45, hjust=1))
 ggsave(file.path(graphics.dir, 'prediction-violins.pdf'), violin.plot, width=4.5, height=5)
 
+pos.statuses <- c('assoc_high', 'linked_high', 'assoc_low', 'linked_low')
+auroc.list <- list()
+
+roc.df <- do.call(rbind, lapply(pos.statuses, function(pos.status) {
+  subset.df <- subset(features.df, status %in% c('negative', pos.status))
+  status <- subset.df$status == pos.status
+  vtm <- VariableThresholdMetrics(subset.df$prediction, status)
+  roc.df <- vtm$roc.df
+  roc.df[, 'Positives'] <- pos.status
+  #split.status <- strsplit(pos.status, '_')[[1]]
+  #roc.df[, 'Association'] <- split.status[1]
+  #roc.df[, 'Confidence'] <- split.status[2]
+  auroc.list[[pos.status]] <<- vtm$auroc
+  return(roc.df)
+}))
+
+
+cols <- as.character(solarized[c('red', 'blue', 'red', 'blue')])
+linetypes <- c('solid', 'solid', 'dotted', 'dotted')
+gglabels <- c(
+  sprintf('HC Primary (%.2f)', auroc.list$assoc_high),
+  sprintf('HC Linked (%.2f)', auroc.list$linked_high),
+  sprintf('LC Primary (%.2f)', auroc.list$assoc_low),
+  sprintf('LC Linked (%.2f)', auroc.list$linked_low))
+
+gg.roc <- ggplot(roc.df, aes(fpr, recall, color=Positives, linetype=Positives))
+gg.roc <- ggROC(gg.roc) + geom_line(size=0.9) +
+  scale_linetype_manual(name='Positive Set (AUROC)', values=linetypes, labels=gglabels, breaks=pos.statuses) +
+  scale_color_manual(name='Positive Set (AUROC)', values=cols, labels=gglabels, breaks=pos.statuses)
+ggsave(file.path(graphics.dir, 'ROC-by-positive-set.pdf'), gg.roc, width=3.7, height=3.7)
+
 
 ################################################################################
 ## Feature correlation plot
 HclustOrder <- function(feature.mat) {
   # Returns the colnames, ordered by heirarchical clustering
   cor.mat <- cor(feature.mat)
-  clust <- hclust(dist(cor.mat))
+  clust <- hclust(dist(cor.mat), method='ward')
   return(colnames(feature.mat)[clust$order])
 }
 
@@ -189,13 +198,17 @@ cor.tri.mat <- cor(cor.mat)
 cor.tri.mat[lower.tri(cor.tri.mat, diag=TRUE)] <- NA
 cor.melt <- na.omit(as.data.frame(reshape2::melt(cor.tri.mat, varnames=c('x', 'y'), value.name='correlation')))
 
+
+xlimits <- features.sorted[-length(features.sorted)]
+ylimits <- rev(features.sorted[-1])
+
 diverging.cols <- c('#0000FF', '#f7eff7', '#FF0000') # blues
 cor.plot <- ggplot(cor.melt, aes(x, y, fill=correlation)) +
   geom_tile(color='white') + 
   scale_fill_gradientn(name=expression("Pearson's" * ~ rho), limits=c(-1, 1), colours=diverging.cols) + 
   #scale_fill_gradient2(name=expression("Pearson's" * ~ rho), limits=c(-1, 1)) + 
-  scale_x_discrete(limits=features.sorted[-length(features.sorted)]) + 
-  scale_y_discrete(limits=rev(features.sorted[-1])) +
+  scale_x_discrete(limits=xlimits, labels=feature.converter[xlimits]) + 
+  scale_y_discrete(limits=ylimits, labels=feature.converter[ylimits]) +
   theme_bw() + theme(axis.text.x=element_text(angle=65, hjust=1)) +
   xlab(NULL) + ylab(NULL) + coord_fixed() +
   theme(plot.background=element_blank(), panel.grid.major=element_blank(),
@@ -262,9 +275,11 @@ auroc.df4 <- OrderAurocDf(auroc.df4)
 
 # Combine
 auroc.df <- rbind(auroc.df1, auroc.df2, auroc.df3, auroc.df4)
-auroc.df$disease_name <- category.df[match(auroc.df$disease_code, category.df$doid_code), 'doid_name']
+
 auroc.df$disease_category <- category.df[match(auroc.df$disease_code, category.df$doid_code), 'category']
 auroc.df$disease_pathophys <- pathophys.df[match(auroc.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+auroc.df$disease_name <- pathophys.df[match(auroc.df$disease_code, pathophys.df$disease_code), 'disease_name']
+
 metric.metapath.mat <- do.call(rbind, strsplit(auroc.df$feature, '|', fixed=TRUE))
 auroc.df$metric <- metric.metapath.mat[, 1]
 auroc.df$metapath <- gsub('-', '', metric.metapath.mat[, 2])
@@ -295,6 +310,9 @@ auroc.df[is.msig.auc, 'name'] <- msig.nomen.df[match(auroc.df[is.msig.auc, 'meta
 MeanConfInt <- function(x) {t.test(x)$conf.int[1:2]}
 category.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00')
 pathophys.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00', 'black')
+
+#pathophys.colors <- as.character(solarized[c('red', 'yellow', 'magenta', 'violet', 'cyan', 'base01')])
+
 ## MSigDB Plot
 msig.df <- subset(auroc.df, panel == 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature' | panel == 'Model')
 msig.disease.df <- subset(msig.df, breadth == 'disease_specific')
@@ -306,7 +324,7 @@ msig.global.df$name <- factor(msig.global.df$name, levels=msig.levels)
 
 set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) + 
   facet_grid(. ~ panel, scales='free_x', space='free_x') +
-  geom_hline(aes(yintercept=0.5), color='red', linetype='dashed') +
+  geom_hline(aes(yintercept=0.5), color='darkgrey', linetype='dashed') +
   stat_summary(fun.y='MeanConfInt', geom='line', color='grey', size=9.5) +
   geom_point(data=msig.global.df, size=11.5, shape='-', color='#4C4C4C') + 
   geom_point(aes(color=disease_pathophys), position=position_jitter(width=0.28), alpha=0.7, size=2.5) + 
@@ -317,9 +335,10 @@ set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) +
   #theme(legend.justification=c(0,1), legend.position=c(0, 1),
   #  legend.background=element_rect(color='grey60', size=0.25),
   #  legend.margin=grid::unit(1, 'points'), legend.direction='horizontal') +
-  scale_colour_manual(name='Pathophysiology', values=pathophys.colors)
+  scale_colour_manual(name='Pathophysiology', values=pathophys.colors) +
+  guides(color=guide_legend(nrow=2))
 msig.plot.path <- file.path(graphics.dir, 'AUROC-msig-plot.pdf')
-ggsave(msig.plot.path, msig.plot, width=6.83, height=4)
+ggsave(msig.plot.path, msig.plot, width=6.83, height=5)
 
 ## NonMSigDB Plot
 nonmsig.df <- subset(auroc.df, panel != 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature')
@@ -334,17 +353,19 @@ nonmsig.global.df$name <- factor(nonmsig.global.df$name, levels=nonmsig.levels)
 
 set.seed(0); nonmsig.plot <- ggplot(nonmsig.disease.df, aes(name, auroc)) + 
   facet_grid(. ~ panel, scales='free_x', space='free_x') +
-  geom_hline(aes(yintercept=0.5), color='red', linetype='dashed') +
+  geom_hline(aes(yintercept=0.5), color='darkgrey', linetype='dashed') +
   stat_summary(fun.y='MeanConfInt', geom='line', color='grey', size=12) +
   geom_point(data=nonmsig.global.df, size=15, shape='-', color='#4C4C4C') + 
   geom_point(aes(color=disease_pathophys), position=position_jitter(width=0.3), alpha=0.7, size=2.5) + 
   theme(plot.margin = grid::unit(c(0, 0, 0, 0), 'points')) + theme_bw() +
   theme(axis.text.x=element_text(angle=45, hjust=1)) + 
   xlab(NULL) + ylab('AUROC') + 
-  theme(legend.position='top', legend.margin=grid::unit(-10, 'points')) +
+  theme(legend.key=element_rect(linetype='blank')) +
+  #theme(legend.position='top', legend.margin=grid::unit(-10, 'points')) +
   #theme(legend.justification=c(0,1), legend.position=c(0, 1),
   #  legend.background=element_rect(color='grey60', size=0.25),
   #  legend.margin=grid::unit(1, 'points'), legend.direction='horizontal') +
+  theme(legend.margin=grid::unit(1, 'points')) +
   scale_colour_manual(name='Pathophysiology', values=pathophys.colors)
 nonmsig.plot.path <- file.path(graphics.dir, 'AUROC-nomsig-plot.pdf')
 ggsave(nonmsig.plot.path, nonmsig.plot, width=6.83, height=4)
@@ -361,10 +382,10 @@ ggsave(nonmsig.plot.path, nonmsig.plot, width=6.83, height=4)
 # Disease Summary Table
 # disease_name, disease_code, disease_category, associations, auroc
 disease.summary.df <- subset(auroc.df, breadth == 'disease_specific' & type == 'model',
-  select=c('disease_name', 'disease_code', 'disease_category', 'positives', 'auroc'))
-#plyr::ddply(features.df, c('disease_code'), plyr::summarize, mean_prediction=mean(prediction))
-#disease.summary.df$mean_prediction <- NA
+  select=c('disease_name', 'disease_code', 'disease_pathophys', 'positives', 'auroc'))
+
 colnames(disease.summary.df)[colnames(disease.summary.df) == 'positives'] <- 'associations'
+colnames(disease.summary.df)[colnames(disease.summary.df) == 'disease_pathophys'] <- 'pathophysiology'
 disease.summary.path <- file.path(webdata.dir, 'disease-summary-table.txt')
 disease.summary.df <- format(disease.summary.df, digits=2)
 write.table(disease.summary.df, disease.summary.path, sep='\t', row.names=FALSE, quote=FALSE)
@@ -372,12 +393,10 @@ write.table(disease.summary.df, disease.summary.path, sep='\t', row.names=FALSE,
 #################
 # Gene Summary Table
 #gene_symbol, gene_code, associations, mean_prediction
-gene.summary.df <- plyr::ddply(features.df, c('gene_symbol'), plyr::summarize,
-  'gene_code' = NA,
-  'associations'=sum(status),
+gene.summary.df <- plyr::ddply(features.df, c('gene_symbol', 'gene_code'), plyr::summarize,
+  'associations'=sum(status_int == 1),
   'mean_prediction'=mean(prediction)
 )
-gene.summary.df$gene_code <- hgnc.df[match(gene.summary.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
 gene.summary.path <- file.path(webdata.dir, 'gene-summary-table.txt')
 gene.summary.df <- format(gene.summary.df, digits=2)
 write.table(gene.summary.df, gene.summary.path, sep='\t', row.names=FALSE, quote=FALSE)
@@ -391,7 +410,7 @@ feature.summary.df <- subset(auroc.df, breadth == 'global' & type == 'feature',
 colnames(feature.summary.df)[colnames(feature.summary.df) == 'name'] <- 'metapath'
 feature.summary.df[feature.summary.df$metric == 'PC_s', 'metric'] <- 'PC_source'
 feature.summary.df[feature.summary.df$metric == 'PC_t', 'metric'] <- 'PC_target'
-feature.summary.df$standardized_coefficient <- coef.df[match(feature.summary.df$feature, coef.df$feature), 'zcoef']
+feature.summary.df$standardized_coefficient <- coef.df[match(feature.summary.df$feature, coef.df$feature), 'ridge_zcoef']
 feature.summary.df$feature <- gsub('|', '_', feature.summary.df$feature, fixed=TRUE)
 feature.summary.path <- file.path(webdata.dir, 'feature-summary-table.txt')
 feature.summary.df <- format(feature.summary.df, digits=2)
@@ -400,14 +419,17 @@ write.table(feature.summary.df, feature.summary.path, sep='\t', row.names=FALSE,
 
 #################
 # Disease Tables
+
+status.converter <- c('assoc_high'='+ HCA', 'assoc_low'='\u00B1 LCA', 'linked_high'='\u00B1 HCL', 'linked_low'='\u00B1 LCL', 'negative'='-')
+
 dir.create(file.path(webdata.dir, 'disease-tables'), showWarnings=FALSE)
 #gene_symbol, gene_code, positives, mean_prediction; prediction
 MakeDiseaseTable <- function(feature.df) {
   gene.summary.index <- match(feature.df$gene_symbol, gene.summary.df$gene_symbol)
   disease.table <- data.frame(
     'gene_symbol'=feature.df$gene_symbol, 
-    'gene_code'=gene.summary.df[gene.summary.index, 'gene_code'], 
-    'status'=feature.df$status, 
+    'gene_code'=feature.df$gene_code, 
+    'status'=status.converter[feature.df$status], 
     'other_associations'=feature.df[, 'PC_s|G-a-D'],
     'mean_prediction'=gene.summary.df[gene.summary.index, 'mean_prediction'],
     'prediction'=feature.df$prediction)
@@ -431,10 +453,9 @@ MakeGeneTable <- function(feature.df) {
   gene.table <- data.frame(
     'disease_name'=feature.df$disease_name, 
     'disease_code'=feature.df$disease_code, 
-    'disease_category'=feature.df$disease_category,
-    'status'=feature.df$status, 
+    'pathophysiology'=feature.df$disease_pathophys,
+    'status'=status.converter[feature.df$status], 
     'other_associations'=feature.df[, 'PC_t|G-a-D'],
-    #'mean_prediction'=disease.summary.df[disease.summary.index, 'mean_prediction'],
     'prediction'=feature.df$prediction)
   return(gene.table)
 }
@@ -459,7 +480,7 @@ MakeFeatureTable <- function(feature.auroc.df) {
   feature.table <- data.frame(
     'disease_name'=feature.auroc.df$disease_name,
     'disease_code'=feature.auroc.df$disease_code,
-    'disease_category'=feature.auroc.df$disease_category,
+    'pathophysiology'=feature.auroc.df$disease_pathophys,
     'associations'=feature.auroc.df$positives,
     'disease_global_auroc'=disease.summary.df[match(feature.auroc.df$disease_code, disease.summary.df$disease_code), 'auroc'],
     'auroc'=feature.auroc.df$auroc)
@@ -492,7 +513,7 @@ coef.match.name.df[msig.row, 'easy_name'] <- paste('{', coef.match.name.df[msig.
 coef.match.name.df <- coef.match.name.df[match(gsub('XB|', '', XB.names, fixed=TRUE), coef.match.name.df$feature), ]
 
 
-prediction.df$gene_code <- hgnc.df[match(prediction.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
+#prediction.df$gene_code <- hgnc.df[match(prediction.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
 
 dir.create(file.path(webdata.dir, 'prediction-terms'), showWarnings=FALSE)
 for (disease.code in gsub(':', '_', disease.summary.df$disease_code, fixed=TRUE)) {

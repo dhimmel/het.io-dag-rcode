@@ -9,8 +9,8 @@ options(width=Sys.getenv('COLUMNS'))
 
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
-
-
+prewtc.id <- '140522-no-wtccc2'
+global.id <- '140522-all-assoc-lessmsig'
 
 # Read Vegas
 vegas.path <- file.path(project.dir, 'vegas', 'vegas_meta2.5_wtccc2_combined.txt')
@@ -18,14 +18,14 @@ vegas.df <- read.delim(vegas.path)
 
 
 # Read Predictions
-predictions.pre.wtc.path <- file.path(project.dir, 'networks', '140321-no-wtccc2', 'MS-predictions-pre-wtccc2.txt')
+predictions.pre.wtc.path <- file.path(project.dir, 'networks', prewtc.id, 'MS-predictions-pre-wtccc2.txt')
 predictions.pre.wtc.df <- read.delim(predictions.pre.wtc.path, check.names=FALSE)
-predictions.pre.wtc.df <- predictions.pre.wtc.df[, c('source', 'prediction')]
+predictions.pre.wtc.df <- predictions.pre.wtc.df[, c('gene_symbol', 'prediction')]
 colnames(predictions.pre.wtc.df) <- c('gene', 'prior_pre_wtc')
 
-predictions.post.wtc.path <- file.path(project.dir, 'networks', '140321-all-assoc', 'prediction-table.txt')
+predictions.post.wtc.path <- file.path(project.dir, 'networks', global.id, 'modeling', 'prediction-table.txt')
 predictions.post.wtc.df <- read.delim(predictions.post.wtc.path, check.names=FALSE)
-predictions.post.wtc.df <- predictions.post.wtc.df[, c('source', 'multiple sclerosis')]
+predictions.post.wtc.df <- predictions.post.wtc.df[, c('gene_symbol', 'multiple sclerosis')]
 colnames(predictions.post.wtc.df) <- c('gene', 'prior_post_wtc')
 
 prior.df <- merge(predictions.pre.wtc.df, predictions.post.wtc.df)
