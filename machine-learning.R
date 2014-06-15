@@ -45,6 +45,20 @@ VariableThresholdMetrics <- function(score, status) {
   return(metrics)
 }
 
+PrunePRC <- function(prc.df, min.dist=0.0005) {
+  dist.df <- prc.df[, c('precision', 'recall')]
+  pointer <- 1
+  as.index <- sapply(2:nrow(dist.df), function(i) {
+    distance <- dist(dist.df[c(pointer, i), 1:2])[1]
+    if (distance > min.dist) {
+      pointer <<- i
+      return(i)
+    } else {return(pointer)}
+  })
+  prc.df <- prc.df[c(1, unique(as.index)), ]
+  return(prc.df)
+}
+
 CrossValidationFolds <- function(Y, nfolds=10, seed=0) {
   stopifnot(min(table(Y)) >= nfolds)
   positions <- seq(1, length(Y))

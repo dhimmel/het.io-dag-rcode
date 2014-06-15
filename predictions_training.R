@@ -65,22 +65,18 @@ saveRDS(cv.ridge.train, file.path(modeling.dir, 'training-model.rds'))
 #cv.ridge.train <- readRDS(file.path(network.dir, 'training-model.rds'))
 y.predicted.train <- as.numeric(predict(cv.ridge.train, s=lambda.train, newx=X.train, type='response'))
 y.predicted.test <- as.numeric(predict(cv.ridge.train, s=lambda.train, newx=X.test, type='response'))
+
 vtm.train <- VariableThresholdMetrics(y.predicted.train, y.train)
 vtm.test <- VariableThresholdMetrics(y.predicted.test, y.test)
-
-vtm.train.df <- vtm.train$threshold.df
-vtm.test.df <- vtm.test$threshold.df
-vtm.part.df <- rbind(cbind(vtm.train.df, 'part'='train'), cbind(vtm.test.df, 'part'='test'))
-
 vtm.test.path <- file.path(modeling.dir, 'variable-threshold-metrics-testing.txt')
-write.table(round(vtm.test.df, 5), vtm.test.path, sep='\t', row.names=FALSE, quote=FALSE)
-
+write.table(round(vtm.test$threshold.df, 5), vtm.test.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 coefs.training <- coef(cv.ridge.train, s=lambda.train)[, 1]
 zcoefs.training <- c(0, coefs.training[-1] * apply(X.train, 2, sd) / sd(y.train))
 
 # Testing Precision-Recall Curve
-prc.plot <- ggplot(vtm.test.df[nrow(vtm.test.df):1, ], aes(recall, precision, color=threshold)) + 
+prc.df <- PrunePRC(vtm.test$threshold.df)
+prc.plot <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold)) + 
   geom_line(size=1, color='grey') + geom_point(size=1.5) + 
   theme_bw() + scale_color_gradientn(colours = rainbow(7)[1:6]) +
   theme(legend.justification=c(1, 1), legend.position=c(1, 1)) +
