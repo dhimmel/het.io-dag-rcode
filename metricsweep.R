@@ -11,28 +11,14 @@ options(stringsAsFactors=FALSE)
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
 code.dir <- file.path(project.dir, 'rcode')
-directory <- file.path(project.dir, 'networks', '140518-metricsweep')
+directory <- file.path(project.dir, 'networks', '140615-metricsweep')
 
 source(file.path(code.dir, 'machine-learning.R'))
-# Using python processing
-#aucs.path <- file.path(directory, 'feature-aucs.txt')
-#auc.df <- read.delim(aucs.path)
-#auc.df$rank <- rank(auc.df$auc)
-#ggplot(auc.df, aes(metapath, metric, fill=rank)) + geom_tile()
-#ggplot(auc.df, aes(metric, auc)) + geom_point()
+source(file.path(code.dir, 'functions.R'))
 
 # Using R processing
 feature.path <- file.path(directory, 'features.txt.gz')
 feature.df <- read.delim(feature.path, check.names=FALSE, stringsAsFactors=FALSE)
-
-# Read partition file with master list of testing and training
-# Not needed because non-training pairs are not computed, left in for safety.
-partitions.path <- file.path(project.dir, 'partitions.txt.gz')
-part.df <- read.delim(partitions.path, colClasses='character')
-# Filter feature.df to only include training pairs
-training.pairs <- apply(part.df[part.df$part=='train', c('disease_code', 'gene_symbol')], 1, paste, collapse='|')
-feature.df.pairs <- apply(feature.df[, c('target', 'source')], 1, paste, collapse='|')
-feature.df <- feature.df[feature.df.pairs %in% training.pairs, ]
 
 # Additional feature.df processing
 feature.df[is.na(feature.df)] <- 0
@@ -44,82 +30,104 @@ stat.df <- subset(stat.df, metapath != 'G-a-D')
 #metrics <- setdiff(stat.df$metric, c('PCs', 'PCt'))
 metrics <- setdiff(stat.df$metric, c('PC', 'PCs', 'PCt', 'DWPC_0.9', 'DWPC_1.0'))
 
-doMC::registerDoMC(cores=8)
+doMC::registerDoMC(cores=7)
 
-glmnet.alpha <- 0.0
+
+glmnet.alphas <- seq(0, 1, 0.2)
 kfolds <- 20
 repititions <- 10
-metric.df <- data.frame('metric'=metrics,
-  'fold'=rep(1:kfolds, each=length(metrics)),
-  'repitition'=rep(1:repititions, each=length(metrics)*kfolds),
-  'lambda'=NA, 'auc'=NA)
-for (i in 1:repititions) {
-  folds <- CrossValidationFolds(feature.df$status, kfolds, seed=i)
 
-  for (k in 1:kfolds) {
-    cat(sprintf('Repition %s, Fold %s\n', i, k))
-    fold <- folds[[k]]
+metric.df.list <- list()
+for (glmnet.alpha in glmnet.alphas) {
 
-    y.train <- feature.df$status[-fold]
-    y.test <- feature.df$status[fold]
+  for (i in 1:repititions) {
+    folds <- CrossValidationFolds(feature.df$status, kfolds, seed=i)
 
-    for (metric in metrics) {
-      cat(sprintf('Metric: %s\n', metric))
-      features <- stat.df[stat.df$metric == metric, 'feature']
-      features <- c(features, 'PCs:G-a-D', 'PCt:G-a-D')
-      X.train <- as.matrix(feature.df[-fold, features])
-      X.test <- as.matrix(feature.df[fold, features])
-      cv.enet <- glmnet::cv.glmnet(X.train, y.train, family='binomial', alpha=glmnet.alpha, standardize=TRUE, parallel=TRUE)
-      lambda <- cv.enet$lambda.1se
-      coef(cv.enet, lambda)
-      y.predicted <- predict(cv.enet, s=lambda, newx=X.test, type='response')
-      vtm <- VariableThresholdMetrics(y.predicted, y.test)
-      metric.df.index <- metric.df$metric == metric & metric.df$fold == k & metric.df$repitition == i
-      metric.df[metric.df.index, 'lambda'] <- lambda
-      metric.df[metric.df.index, 'auc'] <- vtm$auroc
-      # Precision-recall Curve
-      #ggplot(vtm$prg, aes(recall, precision, color=threshold)) + 
-      #  geom_line(size=2) + theme_bw() + scale_colour_gradientn(colours = rainbow(100))
+    for (k in 1:kfolds) {
+      cat(sprintf('Repition %s, Fold %s\n', i, k))
+      fold <- folds[[k]]
+
+      y.train <- feature.df$status[-fold]
+      y.test <- feature.df$status[fold]
+
+      set.seed(i)
+      for (metric in metrics) {
+        cat(sprintf('Metric: %s\n', metric))
+        features <- stat.df[stat.df$metric == metric, 'feature']
+        features <- c(features, 'PCs:G-a-D', 'PCt:G-a-D')
+        X.train <- as.matrix(feature.df[-fold, features])
+        X.test <- as.matrix(feature.df[fold, features])
+        cv.enet <- glmnet::cv.glmnet(X.train, y.train, family='binomial', 
+          alpha=glmnet.alpha, standardize=TRUE, parallel=TRUE)
+        lambda <- cv.enet$lambda.1se
+        y.predicted <- predict(cv.enet, s=lambda, newx=X.test, type='response')
+        vtm <- VariableThresholdMetrics(y.predicted, y.test)
+        temp.df <- data.frame('metric'=metric, 'alpha'=glmnet.alpha, 'fold'=k,
+          'repitition'=i, 'lambda'=lambda, 'auroc'=vtm$auroc)
+        metric.df.list[[length(metric.df.list) + 1]] <- temp.df
+      }
     }
   }
 }
 
+metric.df <- do.call(rbind, metric.df.list)
 
 
+metric.path <- file.path(directory, sprintf('model-auc-%sx%s-CV.txt', repititions, kfolds))
+write.table(metric.df, metric.path, sep='\t', row.names=FALSE, quote=FALSE)
 
-enet.auc.path <- file.path(directory, sprintf('ridge-auc-%sx%s-CV.txt', repititions, kfolds))
-write.table(metric.df, enet.auc.path, sep='\t', row.names=FALSE, quote=FALSE)
-#confint on ggplot
-#mean.conf.int <- function(x) {t.test(x)$conf.int[1:2]}
-#stat_summary(fun.y='mean.conf.int', geom='line')
+metric.df <- read.delim(metric.path, stringsAsFactors=FALSE)
 
-metric.df <- read.delim(enet.auc.path, stringsAsFactors=FALSE)
-metric.summary.df <- plyr::ddply(metric.df, c('metric', 'repitition'),
-  plyr::summarize, 'auc'=mean(auc))
-
+metric.summary.df <- plyr::ddply(metric.df, c('alpha', 'metric', 'repitition'),
+  plyr::summarize, 'auroc'=mean(auroc))
 metric.summary.df[, 'dwpc_exponent'] <- suppressWarnings(as.numeric(gsub('DWPC_', '', metric.summary.df$metric)))
-npc.aucs <- subset(metric.summary.df, metric == 'NPC')[, 'auc']
-npc.mean <- mean(npc.aucs)
-npc.confint <- t.test(npc.aucs)$conf.int
+
+npc.ggdf <- subset(metric.summary.df, metric == 'NPC')
+npc.ggdf <- plyr::ddply(npc.ggdf, 'alpha', plyr::summarize,
+  'lower'=t.test(auroc, conf.level=0.9999)$conf.int[1],
+  'upper'=t.test(auroc, conf.level=0.9999)$conf.int[2],
+  'auroc'=mean(auroc))
+
 
 threshold.dwpc <- 0.4
 
-dwpc.plot.df <- na.omit(metric.summary.df)
-ggplot(dwpc.plot.df, aes(dwpc_exponent, auc)) + theme_bw() +
-  geom_vline(xintercept=threshold.dwpc, color='darkgreen', linetype='dashed') + 
-  geom_rect(xmin=-Inf, xmax=Inf, ymin=npc.confint[1], ymax=npc.confint[2], fill='#7EC0EE') +
-  geom_hline(yintercept=npc.mean, color='#42647F') +
-  #geom_point() +
-  geom_smooth(linetype=0, method='loess', span=0.75, alpha=0.8) +
-  stat_summary(fun.y='mean', geom='point') + 
-  #theme(axis.text.x = element_text(angle=60, hjust=1)) +
-  theme(plot.margin = grid::unit(c(2, 2, 2, 2), 'points')) +
+dwpc.ggdf <- subset(metric.summary.df, ! is.na(dwpc_exponent))
+plot.alphas <- unique(dwpc.ggdf$alpha)
+vline.df <- data.frame('threshold'=c(threshold.dwpc, rep(NA, length(plot.alphas) - 1)), 'alpha'=plot.alphas)
+
+gg.metric <- ggplot(dwpc.ggdf, aes(dwpc_exponent, auroc)) 
+gg.metric <- SetGGTheme(gg.metric) +
+  facet_wrap(~ alpha, nrow=3) +
+  geom_vline(data=vline.df, aes(xintercept=threshold),
+    color=Solar('yellow'), linetype='dashed') + 
+  geom_rect(data=npc.ggdf, aes(x=NULL, ymin=lower, ymax=upper), xmin=-Inf, xmax=Inf,
+    fill=Solar('violet'), alpha=0.4) +
+  geom_hline(data=npc.ggdf, aes(x=NULL, yintercept=auroc), color=Solar('violet'), size=0.25) +
+  geom_smooth(linetype=0, method='loess', span=0.75, alpha=0.6,
+    fill=Solar('magenta'), level=0.9999) +
+  stat_summary(fun.y='mean', geom='point', color=Solar('magenta')) + 
+  scale_x_continuous(breaks=seq(0.1, 0.7, 0.2)) +
+  scale_y_continuous(breaks=seq(0.76, 0.80, 0.02)) + 
   #coord_cartesian(ylim=c(0.784, 0.821)) +
   xlab('DWPC Exponent') + ylab(expression(10 %*% 20 ~ fold ~ CV ~ AUROC))
+#gg.metric
+
+ExpressionFromAlpha <- function(a) {
+  if (a == 0) {
+    method.name <- '(ridge)'
+  } else if (a == 1) {
+    method.name <- '(lasso)'
+  } else {
+    method.name <- '(elastic net)'
+  }
+  expr.call <- bquote(alpha == .(a) ~ .(method.name))
+  return(expr.call)
+}
+
+label.list <- lapply(unique(dwpc.ggdf$alpha), ExpressionFromAlpha)
+gg.metric <- FacetWrapLabeller(gg.metric, label.list)
 
 
-enet.auc.plot.path <- file.path(directory, sprintf('ridge-auc-%sx%s-CV.pdf', repititions, kfolds))
-ggsave(enet.auc.plot.path, width=3, height=3)
-
-
+enet.auc.plot.path <- file.path(directory, sprintf('metrics-%sx%s-CV.pdf', repititions, kfolds))
+ggsave(enet.auc.plot.path, gg.metric, width=width.half, height=3.6)
 
