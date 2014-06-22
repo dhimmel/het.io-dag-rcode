@@ -121,7 +121,10 @@ gg.zcoef <- SetGGTheme(gg.zcoef) +
   theme(legend.justification=c(1,0), legend.position=c(1,0), 
     legend.background=element_rect(color='grey60', size=0.2))
 
-ggsave(file.path(graphics.dir, 'coefficients.pdf'), gg.zcoef, width=width.half, height=4.5)
+path <- file.path(graphics.dir, 'coefficients.pdf')
+OpenPDF(path, width=width.half, height=4.5)
+print(gg.zcoef)
+ClosePDF(path)
 
 
 ################################################################################
@@ -156,8 +159,11 @@ gg.roc <- ggROC(gg.roc) + geom_path(size=0.9) +
     values=linetypes, labels=gglabels, breaks=pos.statuses) +
   scale_color_manual(name='Positive Set (AUROC)', 
     values=cols, labels=gglabels, breaks=pos.statuses)
-ggsave(file.path(graphics.dir, 'ROC-by-positive-set.pdf'), gg.roc, width=width.half, height=width.half - 0.1)
 
+path <- file.path(graphics.dir, 'ROC-by-positive-set.pdf')
+OpenPDF(path, width=width.half, height=width.half - 0.1)
+print(gg.roc)
+ClosePDF(path)
 
 ################################################################################
 ## Feature correlation plot
@@ -193,8 +199,10 @@ cor.plot <- ggplot(cor.melt, aes(x, y, fill=correlation)) +
     legend.position=c(1.0, 0.75), legend.direction='horizontal') +
   guides(fill=guide_colorbar(barwidth=10, barheight=1, title.position='top', title.hjust=0.5))
 
-ggsave(file.path(graphics.dir, 'feature-correlations.pdf'), cor.plot, width=7, height=7)
-
+path <- file.path(graphics.dir, 'feature-correlations.pdf')
+OpenPDF(path, width=7, height=7)
+print(cor.plot)
+ClosePDF(path)
 
 ################################################################################
 ## Disease Specific Predictions on global data set
@@ -275,6 +283,7 @@ auroc.df[is.na(auroc.df$name), 'name'] <- feature.converter[auroc.df[is.na(auroc
 
 ################################################################################
 ## Plot AUROCs
+msig.strip.text <- 'Gene\u2014{MSigDB Collection}\u2014Gene\u2014Disease DWPC'
 
 NAtoFALSE <- function(vec) {
   vec[is.na(vec)] <- FALSE
@@ -285,7 +294,7 @@ auroc.df[NAtoFALSE(substr(auroc.df$metric, 1, 4)) == 'PC_s', 'panel'] <- 'PCs'
 auroc.df[NAtoFALSE(substr(auroc.df$metric, 1, 4)) == 'PC_t', 'panel'] <- 'PCt'
 auroc.df[NAtoFALSE(substr(auroc.df$metric, 1, 4)) == 'DWPC', 'panel'] <- 'DWPC'
 is.msig.auc <- NAtoFALSE(substr(auroc.df$name, 1, 1) == '{')
-auroc.df[is.msig.auc, 'panel'] <- 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature'
+auroc.df[is.msig.auc, 'panel'] <- msig.strip.text
 
 MeanConfInt <- function(x) {t.test(x)$conf.int[1:2]}
 pathophys.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00', 'black')
@@ -306,12 +315,12 @@ PerfPlot <- function(gg) {
   return(gg)
 }
 
-hyphen.size <- 15.5
+emdash.size <- 8
 jitter.width <- 0.3
 point.size <- 1.75
 
 ## MSigDB Plot
-msig.df <- subset(auroc.df, panel == 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature' | panel == 'Model')
+msig.df <- subset(auroc.df, panel == msig.strip.text | panel == 'Model')
 msig.df$name <- gsub('[{}]', '', msig.df$name)
 msig.disease.df <- subset(msig.df, breadth == 'disease_specific')
 msig.global.df <- subset(msig.df, breadth == 'global')
@@ -322,12 +331,12 @@ msig.global.df$name <- factor(msig.global.df$name, levels=msig.levels)
 
 set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) 
 msig.plot <- PerfPlot(msig.plot) +
-  geom_point(data=msig.global.df, size=hyphen.size, shape='-', color=Solar('base02')) + 
+  geom_point(data=msig.global.df, size=emdash.size, shape='\u2014', color=Solar('base02')) + 
   geom_point(aes(color=disease_pathophys), position=position_jitter(width=jitter.width), 
     alpha=0.7, size=point.size, show_guide=FALSE)
 
 ## NonMSigDB Plot
-nonmsig.df <- subset(auroc.df, panel != 'Gene-{MSigDB Collection}-Gene-Disease DWPC Feature')
+nonmsig.df <- subset(auroc.df, panel != msig.strip.text)
 nonmsig.df$panel <- factor(nonmsig.df$panel, levels=c('DWPC', 'PCt', 'PCs', 'Model'))
 nonmsig.disease.df <- subset(nonmsig.df, breadth == 'disease_specific' & panel != 'PCt')
 nonmsig.global.df <- subset(nonmsig.df, breadth == 'global')
@@ -338,15 +347,16 @@ nonmsig.global.df$name <- factor(nonmsig.global.df$name, levels=nonmsig.levels)
 
 set.seed(0); nonmsig.plot <- ggplot(nonmsig.disease.df, aes(name, auroc))
 nonmsig.plot <- PerfPlot(nonmsig.plot) +
-  geom_point(data=nonmsig.global.df, size=hyphen.size, shape='-', color=Solar('base02')) + 
+  geom_point(data=nonmsig.global.df, size=emdash.size, shape='\u2014', color=Solar('base02')) + 
   geom_point(aes(color=disease_pathophys), position=position_jitter(width=jitter.width),
     alpha=0.7, size=point.size) + 
   theme(legend.key=element_rect(linetype='blank')) +
   theme(legend.margin=grid::unit(1, 'points'))
 
-pdf(file.path(graphics.dir, 'AUROC.pdf'), width=width.full, height=width.full)
+path <- file.path(graphics.dir, 'AUROC.pdf')
+OpenPDF(path, width=width.full, height=width.full)
 gridExtra::grid.arrange(msig.plot, nonmsig.plot, ncol=1, widths=c(1, 1))
-dev.off()
+ClosePDF(path)
 
 
 ################################################################################

@@ -61,8 +61,8 @@ prc.df <- PrunePRC(vtm.test$threshold.df)
 
 gg.prc <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold))
 gg.prc <- ggPRC(gg.prc)
-prc.path <- file.path(graphics.dir, 'prc-testing.pdf')
-ggsave(prc.path, gg.prc, width=5, height=3.5)
+#prc.path <- file.path(graphics.dir, 'prc-testing.pdf')
+#ggsave(prc.path, gg.prc, width=5, height=3.5)
 
 # Testing ROC Curve
 roc.df <- rbind(cbind(vtm.train$roc.df, 'part'='train'), cbind(vtm.test$roc.df, 'part'='test'))
@@ -73,15 +73,14 @@ gg.roc <- ggROC(gg.roc) + geom_path() +
     name='Partition (AUROC)', breaks=c('test', 'train'),
     labels=c(sprintf('Testing (%.3f)', vtm.test$auroc), 
              sprintf('Training (%.3f)', vtm.train$auroc)))
-roc.path <- file.path(graphics.dir, 'roc-testing.pdf')
-ggsave(roc.path, gg.roc, width=3, height=2.9)
+#roc.path <- file.path(graphics.dir, 'roc-testing.pdf')
+#ggsave(roc.path, gg.roc, width=3, height=2.9)
 
 # Save combined ROC and PRC
-testing.path <- file.path(graphics.dir, 'performance-testing.pdf')
-pdf(testing.path, width=width.full, height=2.5)
-#gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1))
+path <- file.path(graphics.dir, 'performance-testing.pdf')
+OpenPDF(path, width=width.full, height=2.5)
 gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
-dev.off()
+ClosePDF(path)
 
 
 
