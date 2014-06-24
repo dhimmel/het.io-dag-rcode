@@ -58,12 +58,6 @@ GLMNetCoef <- function(cv.glm, X, y, prepend='', ...) {
 }
 
 ## Plotting functions
-font.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/fonts'
-
-arial <- c(file.path(font.dir, 'Arial.afm'  ),
-           file.path(font.dir, 'Arial_Bold.afm'),
-           file.path(font.dir, 'Arial_Italic.afm' ),
-           file.path(font.dir, 'Arial_Bold_Italic.afm'))
 
 OpenPDF <- function(path, width=4, height=4) {
   cairo_pdf(path, width=width, height=height, bg='white', family='sans')

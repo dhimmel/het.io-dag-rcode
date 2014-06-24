@@ -4,7 +4,43 @@ library(plyr)
 library(reshape2)
 
 options(stringsAsFactors=FALSE)
-options(width=Sys.getenv('COLUMNS'))
+
+project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
+code.dir <- file.path(project.dir, 'rcode')
+source(file.path(code.dir, 'functions.R'))
+
+
+###################################################################
+### Histo
+
+
+path <- '/home/dhimmels/Documents/serg/gwas/MS/Meta2.5/vegas/genewise-pvals.txt.out-backup' 
+gw.df <- read.table(path, sep=' ', header=TRUE, check.names=FALSE, stringsAsFactors=FALSE)
+#gw.df[, c('Gene', 'Pvalue')]
+
+gg.hist <- ggplot(gw.df, aes(Pvalue))
+gg.hist <- SetGGTheme(gg.hist) +
+  geom_hline(yintercept=1, color='grey') + 
+  geom_histogram(aes(y = ..density..), breaks=seq(0, 1, 0.05), 
+    fill=c(Solar('red'), Solar(rep('blue', 19))), color='white') +
+  xlab('P-value') + ylab('Density')
+
+path <- '/home/dhimmels/Dropbox/hetio/figures/Figure_S5.pdf'
+OpenPDF(path, width=width.half, height=2)
+print(gg.hist)
+ClosePDF(path)
+
+
+gg.hist <- ggplot(gw.df, aes(Pvalue))
+gg.hist <- SetGGTheme(gg.hist) +
+  geom_hline(yintercept=1, color='grey') + 
+  geom_histogram(aes(y = ..density..), breaks=seq(0, 1, 0.01), 
+    fill=c(Solar('red'), Solar(rep('blue', 99))), color='white') +
+  xlab('P-value') + ylab('Density')
+
+gg.hist
+##########################################################################################
+
 
 
 

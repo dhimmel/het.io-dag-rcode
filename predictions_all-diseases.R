@@ -179,28 +179,29 @@ cor.mat <- X[, features.sorted]
 cor.tri.mat <- cor(cor.mat)
 cor.tri.mat[lower.tri(cor.tri.mat, diag=TRUE)] <- NA
 cor.melt <- na.omit(as.data.frame(reshape2::melt(cor.tri.mat, varnames=c('x', 'y'), value.name='correlation')))
-
+cor.melt$label <- sprintf('%02d', round(cor.melt$correlation * 100))
 
 xlimits <- features.sorted[-length(features.sorted)]
 ylimits <- rev(features.sorted[-1])
 
 diverging.cols <- c('#0000FF', '#f7eff7', '#FF0000') # blues
-cor.plot <- ggplot(cor.melt, aes(x, y, fill=correlation)) +
-  geom_tile(color='white') + 
-  scale_fill_gradientn(name=expression("Pearson's" * ~ rho), limits=c(-1, 1), colours=diverging.cols) + 
+diverging.cols <- Solar('green', 'cyan', 'blue', 'violet', 'magenta', 'red')
+cor.plot <- ggplot(cor.melt, aes(x, y, fill=correlation))
+cor.plot <- SetGGTheme(cor.plot) +
+  geom_tile(aes(alpha=abs(correlation)), color='white') + 
+  geom_text(aes(label=label), size=3.4, color=Solar('base02')) + 
+  scale_fill_gradientn(colours=diverging.cols) + 
+  scale_alpha(range=c(0.3, 0.9)) + guides(alpha=FALSE, fill=FALSE) +
   scale_x_discrete(limits=xlimits, labels=feature.converter[xlimits]) + 
   scale_y_discrete(limits=ylimits, labels=feature.converter[ylimits]) +
-  theme_bw() + theme(axis.text.x=element_text(angle=65, hjust=1)) +
+  theme(axis.text.x=element_text(angle=65, hjust=1)) +
   xlab(NULL) + ylab(NULL) + coord_fixed() +
   theme(plot.background=element_blank(), panel.grid.major=element_blank(),
     panel.grid.minor=element_blank(), panel.border=element_blank(),
-    axis.line=element_line(color='black')) +
-  theme(legend.justification=c(1, 0), 
-    legend.position=c(1.0, 0.75), legend.direction='horizontal') +
-  guides(fill=guide_colorbar(barwidth=10, barheight=1, title.position='top', title.hjust=0.5))
+    axis.line=element_line(color='black'))
 
 path <- file.path(graphics.dir, 'feature-correlations.pdf')
-OpenPDF(path, width=7, height=7)
+OpenPDF(path, width=width.full, height=width.full)
 print(cor.plot)
 ClosePDF(path)
 

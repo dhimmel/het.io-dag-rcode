@@ -64,10 +64,8 @@ write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 # Testing Precision-Recall Curve
 prc.df <- PrunePRC(vtm.test$threshold.df)
-
 gg.prc <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold))
 gg.prc <- ggPRC(gg.prc)
-
 
 # Testing ROC Curve
 roc.df <- rbind(cbind(vtm.train$roc.df, 'part'='train'), cbind(vtm.test$roc.df, 'part'='test'))
@@ -81,11 +79,10 @@ gg.roc <- ggROC(gg.roc) + geom_path() +
              sprintf('Training (%.3f)', vtm.train$auroc)))
 
 # Save combined ROC and PRC
-testing.path <- file.path(graphics.dir, 'performance-permutation-testing.pdf')
-pdf(testing.path, width=width.full, height=2.5)
-#gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1))
+path <- file.path(graphics.dir, 'performance-permutation-testing.pdf')
+OpenPDF(path, width=width.full, height=2.5)
 gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
-dev.off()
+ClosePDF(path)
 
 
 
