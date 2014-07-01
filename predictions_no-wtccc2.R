@@ -49,12 +49,17 @@ test.ridge <- TestModel(cv.model=fit.ridge$cv.model, X=X.test, y=y.test)
 SaveTest(test.ridge, dirs)
 
 
+# Manually chosen threshold
+thresh <- list('threshold'=0.02430711, 'fpr'=0.00137,
+  'recall'=0.108108, 'precision'=0.1333333, 'lift'=68.4432)
+
 # Training and Testing ROC Curves
-gg.roc <- ggplot(test.ridge$vtm$roc.df, aes(fpr, recall, color=part))
+gg.roc <- ggplot(test.ridge$vtm$roc.df, aes(fpr, recall))
 gg.roc <- ggROC(gg.roc) + geom_path(color=as.character(solarized['violet'])) +
   annotate('text', x=Inf, y=-Inf, 
     label=sprintf('AUROC == %.3f', test.ridge$vtm$auroc), 
-    hjust=1.1, vjust=-1, parse=TRUE, size=3.5)
+    hjust=1.1, vjust=-1, parse=TRUE, size=3.5) +
+  geom_point(x=thresh$fpr, y=thresh$recall, shape=4, size=2.2, color=Solar('base03'))
 
 # Testing Precision-Recall Curve
 prc.df <- PrunePRC(test.ridge$vtm$threshold.df)
@@ -63,7 +68,8 @@ ylim.prc <- range(prc.df$precision)
 gg.prc <- ggPRC(gg.prc) +
   annotate('text', x=0.7, y=Inf, 
     label=sprintf('AUPRC == %s', ChrRound(test.ridge$vtm$auprc, 3)), 
-    hjust=1, vjust=2, parse=TRUE, size=3.5)
+    hjust=1, vjust=2, parse=TRUE, size=3.5) +
+  geom_point(x=thresh$recall, y=thresh$precision, shape=4, size=2.2, color=Solar('base03'))
 
 # Save combined ROC and PRC
 path <- file.path(dirs$plots, 'performance.pdf')

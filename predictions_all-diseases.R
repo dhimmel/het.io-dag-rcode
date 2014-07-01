@@ -1,31 +1,24 @@
-library(glmnet)
-library(ggplot2)
-library(doMC)
-library(grid)
-library(gtools)
-library(plyr)
-library(reshape2)
-
 options(stringsAsFactors=FALSE)
 
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
-network.id <- '140615-all-assoc'
 
+# Load code
 code.dir <- file.path(project.dir, 'rcode')
+sources <- c('settings.R', 'hnlp-learning.R', 'machine-learning.R', 'plotting.R')
+for (source.filename in sources) {
+  source(file.path(code.dir, source.filename))
+}
+
+# Load network info
+network.id <- '140615-all-assoc'
 network.dir <- file.path(project.dir, 'networks', network.id)
-feature.dir <- file.path(network.dir, 'features')
-graphics.dir <- file.path(network.dir, 'graphics')
-modeling.dir <- file.path(network.dir, 'modeling')
-webdata.dir <- file.path(network.dir, 'webdata')
-dir.create(graphics.dir, showWarnings=FALSE)
-dir.create(modeling.dir, showWarnings=FALSE)
-dir.create(webdata.dir, showWarnings=FALSE)
+dirs <- InitializeNetworkDir(network.dir)
+dirs$webdata <- file.path(network.dir, 'webdata')
+dir.create(dirs$webdata, showWarnings=FALSE)
 
-source(file.path(code.dir, 'machine-learning.R'))
-source(file.path(code.dir, 'functions.R'))
-
-features.df <- ReadFeatures(feature.dir)
-feature.names <- colnames(features.df)[-(1:8)]
+# Read Features
+feature.df <- ReadFeatures(dirs$features)
+feature.names <- colnames(feature.df)[-(1:8)]
 
 # Read feature descriptions and easy_names
 feature.desc.path <- file.path(project.dir, 'data-integration', 'feature-descriptions.txt')
@@ -36,61 +29,57 @@ names(feature.converter) <- desc.df$feature
 # Read pathophysiology
 pathophys.path <- file.path(project.dir, 'data-integration', 'pathophysiology.txt')
 pathophys.df <- read.delim(pathophys.path)
-features.df$disease_pathophys <- pathophys.df[match(features.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+feature.df$disease_pathophys <- pathophys.df[match(feature.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
 
 ################################################################################
 ## Fit on all oberservations
 
 # Fit on whole data (global)
-X <- as.matrix(features.df[, feature.names])
-y <- features.df$status_int
+X <- as.matrix(feature.df[, feature.names])
+y <- feature.df$status_int
 
-X.model <- as.matrix(subset(features.df, status_int != -1, select=feature.names))
-y.model <- subset(features.df, status_int != -1)[, 'status_int']
+X.train <- as.matrix(subset(feature.df, status_int != -1, select=feature.names))
+y.train <- subset(feature.df, status_int != -1)[, 'status_int']
 
-# Fit regression (with cross-validation to choose 'one-standard-error' lambda)
-doMC::registerDoMC(cores=7)
-set.seed(0); cv.ridge <- glmnet::cv.glmnet(X.model, y.model, family='binomial', 
-  alpha=0, standardize=TRUE, parallel=TRUE) # fit ridge
-set.seed(0); cv.lasso <- glmnet::cv.glmnet(X.model, y.model, family='binomial', 
-  alpha=1, standardize=TRUE, parallel=TRUE) # fit lasso
-# Save cv.glmnet objects as an R data structures
-saveRDS(cv.ridge, file.path(modeling.dir, 'model-ridge.rds'))
-saveRDS(cv.lasso, file.path(modeling.dir, 'model-lasso.rds'))
+fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
+fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
+
+SaveFit(fit.ridge, dirs, suffix='-ridge')
+SaveFit(fit.lasso, dirs, suffix='-lasso')
+
 
 # Read ridge and lasso models from file
-cv.ridge <- readRDS(file.path(modeling.dir, 'model-ridge.rds'))
-cv.lasso <- readRDS(file.path(modeling.dir, 'model-lasso.rds'))
+#cv.ridge <- readRDS(file.path(dirs$model, 'model-ridge.rds'))
+#cv.lasso <- readRDS(file.path(dirs$model, 'model-lasso.rds'))
 
 # Create coefficient data.frame
-ridge.coef.df <- GLMNetCoef(cv.ridge, X.model, y.model, prepend='ridge_',
+ridge.coef.df <- GLMNetCoef(fit.ridge$cv.model, X.train, y.model, prepend='ridge_',
   name=c('intercept', feature.converter[feature.names]))
-lasso.coef.df <- GLMNetCoef(cv.lasso, X.model, y.model, prepend='lasso_')
+lasso.coef.df <- GLMNetCoef(fit.lasso$cv.model, X.train, y.model, prepend='lasso_')
 coef.df <- merge(ridge.coef.df, lasso.coef.df)
-coef.path <- file.path(modeling.dir, 'coefficients.txt')
+coef.path <- file.path(dirs$model, 'coefficients.txt')
 write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
 
-
 # Make predictions using the global model
-features.df[, 'ridge'] <- as.numeric(predict(cv.ridge, s=cv.ridge$lambda.1se, newx=X, type='response'))
-features.df[, 'lasso'] <- as.numeric(predict(cv.lasso, s=cv.lasso$lambda.1se, newx=X, type='response'))
+feature.df[, 'ridge'] <- MakePredictions(cv.model=fit.ridge$cv.model, X=X)
+feature.df[, 'lasso'] <- MakePredictions(cv.model=fit.lasso$cv.model, X=X)
 
 # Calculate performance
-feat.perf.df <- subset(features.df, status_int != -1)
-vtm.ridge <- VariableThresholdMetrics(feat.perf.df$ridge, feat.perf.df$status_int)
-vtm.lasso <- VariableThresholdMetrics(feat.perf.df$lasso, feat.perf.df$status_int)
+#feat.perf.df <- subset(feature.df, status_int != -1)
+vtm.ridge <- fit.ridge$vtm
+vtm.lasso <- fit.lasso$vtm
 
 # Save ridge predictions
-prediction.cast <- reshape2::dcast(features.df, gene_symbol ~ disease_name, value.var='ridge')
-predictions.cast.path <- file.path(modeling.dir, 'prediction-table.txt')
+prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='ridge')
+predictions.cast.path <- file.path(dirs$model, 'prediction-table.txt')
 write.table(prediction.cast, predictions.cast.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 ## Save XB and make predictions
 XB.mat <- X %*% diag(ridge.coef.df[-1, 'ridge_coef'])
 XB.names <- paste('XB|', feature.names, sep='')
 colnames(XB.mat) <- XB.names
-prediction.df <- cbind(features.df, as.data.frame(XB.mat, check.names=FALSE))
-predictions.file <- gzfile(file.path(modeling.dir, 'predictions.txt.gz'), 'w')
+prediction.df <- cbind(feature.df, as.data.frame(XB.mat, check.names=FALSE))
+predictions.file <- gzfile(file.path(dirs$model, 'predictions.txt.gz'), 'w')
 write.table(prediction.df, predictions.file, sep='\t', row.names=FALSE, quote=FALSE)
 close(predictions.file)
 
@@ -121,7 +110,7 @@ gg.zcoef <- SetGGTheme(gg.zcoef) +
   theme(legend.justification=c(1,0), legend.position=c(1,0), 
     legend.background=element_rect(color='grey60', size=0.2))
 
-path <- file.path(graphics.dir, 'coefficients.pdf')
+path <- file.path(dirs$plots, 'coefficients.pdf')
 OpenPDF(path, width=width.half, height=4.5)
 print(gg.zcoef)
 ClosePDF(path)
@@ -134,7 +123,7 @@ pos.statuses <- c('HC_primary', 'HC_secondary', 'LC_primary', 'LC_secondary')
 auroc.list <- list()
 
 roc.df <- do.call(rbind, lapply(pos.statuses, function(pos.status) {
-  subset.df <- subset(features.df, status %in% c('negative', pos.status))
+  subset.df <- subset(feature.df, status %in% c('negative', pos.status))
   status <- subset.df$status == pos.status
   vtm <- VariableThresholdMetrics(subset.df$ridge, status)
   roc.df <- vtm$roc.df
@@ -160,7 +149,7 @@ gg.roc <- ggROC(gg.roc) + geom_path(size=0.9) +
   scale_color_manual(name='Positive Set (AUROC)', 
     values=cols, labels=gglabels, breaks=pos.statuses)
 
-path <- file.path(graphics.dir, 'ROC-by-positive-set.pdf')
+path <- file.path(dirs$plots, 'ROC-by-positive-set.pdf')
 OpenPDF(path, width=width.half, height=width.half - 0.1)
 print(gg.roc)
 ClosePDF(path)
@@ -200,7 +189,7 @@ cor.plot <- SetGGTheme(cor.plot) +
     panel.grid.minor=element_blank(), panel.border=element_blank(),
     axis.line=element_line(color='black'))
 
-path <- file.path(graphics.dir, 'feature-correlations.pdf')
+path <- file.path(dirs$plots, 'feature-correlations.pdf')
 OpenPDF(path, width=width.full, height=width.full)
 print(cor.plot)
 ClosePDF(path)
@@ -354,7 +343,7 @@ nonmsig.plot <- PerfPlot(nonmsig.plot) +
   theme(legend.key=element_rect(linetype='blank')) +
   theme(legend.margin=grid::unit(1, 'points'))
 
-path <- file.path(graphics.dir, 'AUROC.pdf')
+path <- file.path(dirs$plots, 'AUROC.pdf')
 OpenPDF(path, width=width.full, height=width.full)
 gridExtra::grid.arrange(msig.plot, nonmsig.plot, ncol=1, widths=c(1, 1))
 ClosePDF(path)
@@ -365,7 +354,7 @@ ClosePDF(path)
 
 #hgnc.path <- '/home/dhimmels/Documents/serg/data-sources/hgnc/140205/protein-coding.txt'
 #hgnc.df <- read.delim(hgnc.path)
-#features.df$gene_code <- hgnc.df[match(features.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
+#feature.df$gene_code <- hgnc.df[match(feature.df$gene_symbol, hgnc.df$symbol), 'hgnc_id']
 
 #################
 # Disease Summary Table
@@ -382,7 +371,7 @@ write.table(disease.summary.df, disease.summary.path, sep='\t', row.names=FALSE,
 #################
 # Gene Summary Table
 #gene_symbol, gene_code, associations, mean_prediction
-gene.summary.df <- plyr::ddply(features.df, c('gene_symbol', 'gene_code'), plyr::summarize,
+gene.summary.df <- plyr::ddply(feature.df, c('gene_symbol', 'gene_code'), plyr::summarize,
   'associations'=sum(status_int == 1),
   'mean_prediction'=mean(prediction)
 )
@@ -424,7 +413,7 @@ MakeDiseaseTable <- function(feature.df) {
     'prediction'=feature.df$prediction)
   return(disease.table)
 }
-disease.tables <- plyr::dlply(features.df, 'disease_code', MakeDiseaseTable)
+disease.tables <- plyr::dlply(feature.df, 'disease_code', MakeDiseaseTable)
 for (disease_code in names(disease.tables)) {
   disease.table <- disease.tables[[disease_code]]
   disease.table <- format(disease.table, digits=2)
@@ -448,7 +437,7 @@ MakeGeneTable <- function(feature.df) {
     'prediction'=feature.df$prediction)
   return(gene.table)
 }
-gene.tables <- plyr::dlply(features.df, 'gene_code', MakeGeneTable)
+gene.tables <- plyr::dlply(feature.df, 'gene_code', MakeGeneTable)
 for (gene.code in names(gene.tables)) {
   gene.table <- gene.tables[[gene.code]]
   gene.table <- format(gene.table, digits=2)

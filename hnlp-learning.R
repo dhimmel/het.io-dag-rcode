@@ -71,7 +71,7 @@ SaveFit <- function(fit, dirs, suffix='', digits=5) {
   # Save training vtm
   path <- file.path(dirs$model, sprintf('training-vtm%s.txt.gz', suffix))
   gz.file <- gzfile(path, 'w')
-  formatted.df <- format(fit$vtm, digits=digits)
+  formatted.df <- format(fit$vtm$threshold.df, digits=digits)
   write.table(formatted.df, gz.file, sep='\t', row.names=FALSE, quote=FALSE)
   close(gz.file)
 
@@ -85,7 +85,7 @@ SaveTest <- function(test, dirs, suffix='', digits=5) {
   # Save testing vtm
   path <- file.path(dirs$model, sprintf('testing-vtm%s.txt.gz', suffix))
   gz.file <- gzfile(path, 'w')
-  formatted.df <- format(test$vtm, digits=digits)
+  formatted.df <- format(test$vtm$threshold.df, digits=digits)
   write.table(formatted.df, gz.file, sep='\t', row.names=FALSE, quote=FALSE)
   close(gz.file)
 }
