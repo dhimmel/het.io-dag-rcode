@@ -91,6 +91,9 @@ hcs_post_wtc <- subset(ms.df, status_post_wtc == 'HC_secondary')[, 'gene_symbol'
 
 ms.df <- ms.df[order(ms.df$chromosome, ms.df$meta_base_start, ms.df$meta_base_stop), ]
 
+# xMHC region defined from doi:10.1038/nrg1489
+xmhc <- ms.df[which(ms.df$gene_symbol == 'SCGN'):which(ms.df$gene_symbol == 'SYNGAP1'), 'gene_symbol']
+
 linked <- NULL
 for (primary in hcp_post_wtc) {
   i <- which(ms.df$gene_symbol == primary)
@@ -102,13 +105,23 @@ for (primary in hcp_post_wtc) {
   linked_symbols <- chrom.df[c(upstream, downstream[-1]), 'gene_symbol']
   linked <- c(linked, linked_symbols)
 }
-exclusions <- unique(c(hcp_post_wtc, linked, hcs_post_wtc))
+exclusions <- unique(c(hcp_post_wtc, linked, hcs_post_wtc, xmhc))
 novel.df <- subset(ms.df, ! (gene_symbol %in% exclusions))
 novel.df <- novel.df[order(novel.df$prediction_pre_wtc, decreasing=TRUE), ]
 nominal.novel.df <- subset(novel.df, meta_p_value <= 0.05) 
 
 
 
+
+
+
+
+
+
+
+
+
+# Below is old
 novel.df <- subset(ms.df, ! wtc_linked)
 nominal.novel.df <- subset(novel.df, pval_meta <= 0.05)
 nominal.novel.df <- nominal.novel.df[order(nominal.novel.df$prior_pre_wtc, decreasing=TRUE), ]
