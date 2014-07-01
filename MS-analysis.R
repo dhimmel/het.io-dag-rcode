@@ -1,72 +1,61 @@
-library(ggplot2)
-library(grid)
-library(plyr)
-library(reshape2)
-
 options(stringsAsFactors=FALSE)
 
+
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
+
+# Load code
 code.dir <- file.path(project.dir, 'rcode')
-source(file.path(code.dir, 'functions.R'))
+sources <- c('settings.R', 'plotting.R')
+for (source.filename in sources) {
+  source(file.path(code.dir, source.filename))
+}
+
 
 
 ###################################################################
 ### Histo
 
+# Read Vegas
+vegas.path <- '/home/dhimmels/Documents/serg/gwas/MS/vegas-cast.txt'
+vegas.df <- read.delim(vegas.path, stringsAsFactors=FALSE)
 
-path <- '/home/dhimmels/Documents/serg/gwas/MS/Meta2.5/vegas/genewise-pvals.txt.out-backup' 
-gw.df <- read.table(path, sep=' ', header=TRUE, check.names=FALSE, stringsAsFactors=FALSE)
-#gw.df[, c('Gene', 'Pvalue')]
-
-gg.hist <- ggplot(gw.df, aes(Pvalue))
+hist.df <- cbind(vegas.df, strip_label='Meta2.5')
+gg.hist <- ggplot(hist.df, aes(meta_p_value))
 gg.hist <- SetGGTheme(gg.hist) +
+  facet_grid(strip_label ~ .) +
   geom_hline(yintercept=1, color='grey') + 
   geom_histogram(aes(y = ..density..), breaks=seq(0, 1, 0.05), 
     fill=c(Solar('red'), Solar(rep('blue', 19))), color='white') +
+  scale_x_continuous(breaks=breaks.prc, expand=c(0.03, 0)) + 
+  scale_y_continuous(breaks=seq(0.2, 3, 0.4), expand=c(0.03, 0)) +
   xlab('P-value') + ylab('Density')
 
-path <- '/home/dhimmels/Dropbox/hetio/figures/Figure_S5.pdf'
+path <- file.path(project.dir, 'MS-analysis', 'meta2.5-vegas.pdf')
 OpenPDF(path, width=width.half, height=2)
 print(gg.hist)
 ClosePDF(path)
 
 
-gg.hist <- ggplot(gw.df, aes(Pvalue))
-gg.hist <- SetGGTheme(gg.hist) +
-  geom_hline(yintercept=1, color='grey') + 
-  geom_histogram(aes(y = ..density..), breaks=seq(0, 1, 0.01), 
-    fill=c(Solar('red'), Solar(rep('blue', 99))), color='white') +
-  xlab('P-value') + ylab('Density')
+#########################################################################
 
-gg.hist
-##########################################################################################
-
-
-
-
-project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
-prewtc.id <- '140522-no-wtccc2'
-global.id <- '140522-all-assoc-lessmsig'
-
-# Read Vegas
-vegas.path <- file.path(project.dir, 'vegas', 'vegas_meta2.5_wtccc2_combined.txt')
-vegas.df <- read.delim(vegas.path)
+prewtc.id <- '140615-no-wtccc2'
+global.id <- '140615-all-assoc'
 
 
 # Read Predictions
-predictions.pre.wtc.path <- file.path(project.dir, 'networks', prewtc.id, 'MS-predictions-pre-wtccc2.txt')
+predictions.pre.wtc.path <- file.path(project.dir, 'networks', prewtc.id, 'model', 'MS-predictions.txt.gz')
 predictions.pre.wtc.df <- read.delim(predictions.pre.wtc.path, check.names=FALSE)
-predictions.pre.wtc.df <- predictions.pre.wtc.df[, c('gene_symbol', 'prediction')]
-colnames(predictions.pre.wtc.df) <- c('gene', 'prior_pre_wtc')
+predictions.pre.wtc.df <- predictions.pre.wtc.df[, c('gene_symbol', 'ridge')]
+colnames(predictions.pre.wtc.df) <- c('gene_symbol', 'prediction_pre_wtc')
 
 predictions.post.wtc.path <- file.path(project.dir, 'networks', global.id, 'modeling', 'prediction-table.txt')
 predictions.post.wtc.df <- read.delim(predictions.post.wtc.path, check.names=FALSE)
 predictions.post.wtc.df <- predictions.post.wtc.df[, c('gene_symbol', 'multiple sclerosis')]
-colnames(predictions.post.wtc.df) <- c('gene', 'prior_post_wtc')
+colnames(predictions.post.wtc.df) <- c('gene_symbol', 'prediction_post_wtc')
 
 prior.df <- merge(predictions.pre.wtc.df, predictions.post.wtc.df)
 
-prior.scatplot <- ggplot(prior.df, aes(prior_pre_wtc, prior_post_wtc)) +
+prior.scatplot <- ggplot(prior.df, aes(prediction_pre_wtc, prediction_post_wtc)) +
   geom_point(alpha=0.3) + geom_smooth() + 
   coord_trans(x='log10', y='log10') + theme_bw() +
   xlab('Pre-WTCCC2') + ylab('Post-WTCCC2') + ggtitle('MS Predictions') +
@@ -74,8 +63,51 @@ prior.scatplot <- ggplot(prior.df, aes(prior_pre_wtc, prior_post_wtc)) +
 path <- file.path(project.dir, 'MS-analysis', 'prior-scatterplot.pdf')
 ggsave(path, prior.scatplot, width=4, height=6)
 
-# 
-ms.df <- merge(vegas.df, prior.df)
+# Merge Vegas and Predictions
+vegas.select.df <- vegas.df[c('gene_symbol', 'chromosome', 'meta_base_start', 'meta_base_stop', 'meta_p_value', 'wtc_p_value')]
+ms.df <- merge(vegas.select.df, prior.df)
+
+
+# Read GWAS Catalog Associations
+# Pre-WTCCC2
+assoc.pre.wtc.path <- '/home/dhimmels/Documents/serg/data-sources/gwas-catalog/140205/processed-no-wtccc2/association-statuses.txt'
+assoc.pre.wtc.df <- read.delim(assoc.pre.wtc.path, stringsAsFactors=FALSE)
+assoc.pre.wtc.df <- subset(assoc.pre.wtc.df, disease_name == 'multiple sclerosis')
+status.pre.wtc <- assoc.pre.wtc.df[match(ms.df$gene_symbol, assoc.pre.wtc.df$gene_symbol), 'status']
+status.pre.wtc[is.na(status.pre.wtc)] <- 'negative'
+ms.df$status_pre_wtc <- status.pre.wtc
+
+# Post-WTCCC2
+assoc.post.wtc.path <- '/home/dhimmels/Documents/serg/data-sources/gwas-catalog/140205/processed/association-statuses.txt'
+assoc.post.wtc.df <- read.delim(assoc.post.wtc.path, stringsAsFactors=FALSE)
+assoc.post.wtc.df <- subset(assoc.post.wtc.df, disease_name == 'multiple sclerosis')
+status.post.wtc <- assoc.post.wtc.df[match(ms.df$gene_symbol, assoc.post.wtc.df$gene_symbol), 'status']
+status.post.wtc[is.na(status.post.wtc)] <- 'negative'
+ms.df$status_post_wtc <- status.post.wtc
+
+# status_pre_wtc status_post_wtc
+hcp_post_wtc <- subset(ms.df, status_post_wtc == 'HC_primary')[, 'gene_symbol']
+hcs_post_wtc <- subset(ms.df, status_post_wtc == 'HC_secondary')[, 'gene_symbol']
+
+ms.df <- ms.df[order(ms.df$chromosome, ms.df$meta_base_start, ms.df$meta_base_stop), ]
+
+linked <- NULL
+for (primary in hcp_post_wtc) {
+  i <- which(ms.df$gene_symbol == primary)
+  chrom.df <- subset(ms.df, chromosome == ms.df[i, 'chromosome'])
+  i <- which(chrom.df$gene_symbol == primary)
+  is.nominal <- chrom.df$wtc_p_value <= 0.05
+  upstream <- cumsum(is.nominal[i:1]) == seq.int(i)
+  downstream <- cumsum(is.nominal[i:nrow(chrom.df)]) == seq.int(nrow(chrom.df) - i + 1)
+  linked_symbols <- chrom.df[c(upstream, downstream[-1]), 'gene_symbol']
+  linked <- c(linked, linked_symbols)
+}
+exclusions <- unique(c(hcp_post_wtc, linked, hcs_post_wtc))
+novel.df <- subset(ms.df, ! (gene_symbol %in% exclusions))
+novel.df <- novel.df[order(novel.df$prediction_pre_wtc, decreasing=TRUE), ]
+nominal.novel.df <- subset(novel.df, meta_p_value <= 0.05) 
+
+
 
 novel.df <- subset(ms.df, ! wtc_linked)
 nominal.novel.df <- subset(novel.df, pval_meta <= 0.05)

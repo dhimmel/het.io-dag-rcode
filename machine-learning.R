@@ -1,3 +1,6 @@
+library(ROCR)
+library(caTools)
+
 SplitTesting <- function(tab, status, percent.testing=1/3, seed=0) {
   # Split dataframe or matrix tab with binary status into train and test sets.
   # Dataset is stratified by status for equal percent.testing in both sets.
@@ -25,7 +28,7 @@ SplitTesting <- function(tab, status, percent.testing=1/3, seed=0) {
 VariableThresholdMetrics <- function(score, status) {
   # TPR is equivalent to recall
   rocr.pred <- ROCR::prediction(score, status)
-  auroc <- ROCR::performance(rocr.pred, 'auc')@y.values[[1]]
+
   threshold.df <- data.frame(
     'threshold'=rocr.pred@cutoffs[[1]],
     'fpr'=ROCR::performance(rocr.pred, measure='fpr')@y.values[[1]],
@@ -33,20 +36,33 @@ VariableThresholdMetrics <- function(score, status) {
     'precision'=ROCR::performance(rocr.pred, measure='prec')@y.values[[1]],
     'lift'=ROCR::performance(rocr.pred, measure='lift')@y.values[[1]]
   )
+ 
+  auroc <- ROCR::performance(rocr.pred, 'auc')@y.values[[1]]
+  roc.df <- PruneROC(threshold.df[, c('fpr', 'recall')])
 
-  roc.df <- threshold.df[, c('fpr', 'recall')]
+  trapz.df <- na.omit(threshold.df[, c('recall', 'precision')])
+  auprc <- caTools::trapz(trapz.df$recall, trapz.df$precision)
+
+  metrics <- list('auroc'=auroc, 'auprc'=auprc, 'threshold.df'=threshold.df, 'roc.df'=roc.df)
+  return(metrics)
+}
+
+PruneROC <- function(roc.df) {
+  stopifnot(all(c('fpr', 'recall') %in% colnames(roc.df)))
   for (measure in c('fpr', 'recall')) {
     not.dup <- ! duplicated(roc.df$recall)
     not.dup <- not.dup | c(not.dup[-1], TRUE)
     roc.df <- roc.df[not.dup, ]
   }
-
-  metrics <- list('auroc'=auroc, 'threshold.df'=threshold.df, 'roc.df'=roc.df)
-  return(metrics)
+  return(roc.df)
 }
 
 PrunePRC <- function(prc.df, min.dist=0.0005) {
+  stopifnot(all(c('precision', 'recall') %in% colnames(prc.df)))
   dist.df <- prc.df[, c('precision', 'recall')]
+  keep.row <- rowSums(is.na(dist.df)) == 0
+  prc.df <- prc.df[keep.row, ]
+  dist.df <- dist.df[keep.row, ]
   pointer <- 1
   as.index <- sapply(2:nrow(dist.df), function(i) {
     distance <- dist(dist.df[c(pointer, i), 1:2])[1]
