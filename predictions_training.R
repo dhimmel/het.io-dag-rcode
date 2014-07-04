@@ -30,11 +30,19 @@ y.test <- test.df$status_int
 # Fit and test model
 fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
 test.ridge <- TestModel(cv.model=fit.ridge$cv.model, X=X.test, y=y.test)
-SaveFit(fit.ridge, dirs)
-SaveTest(test.ridge, dirs)
+SaveFit(fit.ridge, dirs, suffix='-ridge')
+SaveTest(test.ridge, dirs, suffix='-ridge')
+
+fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
+test.lasso <- TestModel(cv.model=fit.lasso$cv.model, X=X.test, y=y.test)
+SaveFit(fit.lasso, dirs, suffix='-ridge')
+SaveTest(test.lasso, dirs, suffix='-ridge')
 
 
 # Training and Testing ROC Curves
+
+## Ridge performance
+# ROC
 roc.df <- rbind(
   cbind(fit.ridge$vtm$roc.df, 'part'='train'),
   cbind(test.ridge$vtm$roc.df, 'part'='test'))
@@ -47,17 +55,49 @@ gg.roc <- ggROC(gg.roc) + geom_path() +
 
 # Testing Precision-Recall Curve
 prc.df <- PrunePRC(test.ridge$vtm$threshold.df)
+prc.df$panel <- 'Ridge'
 gg.prc <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold))
 gg.prc <- ggPRC(gg.prc) +
   annotate('text', x=0.7, y=Inf, 
     label=sprintf('AUPRC == %s', ChrRound(test.ridge$vtm$auprc, 3)), 
-    hjust=1, vjust=2, parse=TRUE, size=3.5)
+    hjust=1, vjust=2, parse=TRUE, size=3.5) +
+  facet_grid(panel ~ .)
 
 # Save combined ROC and PRC
-path <- file.path(dirs$plots, 'performance.pdf')
+path <- file.path(dirs$plots, 'performance-ridge.pdf')
 OpenPDF(path, width=width.full, height=2.5)
 gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
 ClosePDF(path)
+
+
+## Lasso performance
+# ROC
+roc.df <- rbind(
+  cbind(fit.lasso$vtm$roc.df, 'part'='train'),
+  cbind(test.lasso$vtm$roc.df, 'part'='test'))
+gg.roc <- ggplot(roc.df, aes(fpr, recall, color=part))
+gg.roc <- ggROC(gg.roc) + geom_path() +
+  scale_color_manual(values=as.character(solarized[c('violet', 'green')]), 
+    name='Partition (AUROC)', breaks=c('test', 'train'),
+    labels=c(sprintf('Testing (%.3f)', test.lasso$vtm$auroc), 
+             sprintf('Training (%.3f)', fit.lasso$vtm$auroc)))
+
+# Testing Precision-Recall Curve
+prc.df <- PrunePRC(test.lasso$vtm$threshold.df)
+prc.df$panel <- 'Lasso'
+gg.prc <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold))
+gg.prc <- ggPRC(gg.prc) +
+  annotate('text', x=0.7, y=Inf, 
+    label=sprintf('AUPRC == %s', ChrRound(test.lasso$vtm$auprc, 3)), 
+    hjust=1, vjust=2, parse=TRUE, size=3.5) +
+  facet_grid(panel ~ .)
+
+# Save combined ROC and PRC
+path <- file.path(dirs$plots, 'performance-lasso.pdf')
+OpenPDF(path, width=width.full, height=2.5)
+gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
+ClosePDF(path)
+
 
 
 

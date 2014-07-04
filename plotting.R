@@ -3,23 +3,7 @@ library(grid)
 library(gtools)
 library(gridExtra)
 
-
-# plotting parameters
-width.full <- 6.83
-width.half <- 3.27
-
-breaks.roc <- seq(0, 1, by=0.2)
-breaks.prc <- seq(0, 1, by=0.2)
-ylim.prc <- c(0, 1)
-
-# Colors
-strip.fill <- '#fdf6e3' # solarized website background
-
-
-'#300A24' # Blackberry (ubuntu terminal)
-'#F8F6F7' # lighter blackberry
-
-
+# Solarized Color Pallete
 solarized <- c(
   yellow='#b58900', orange='#cb4b16', red='#dc322f', magenta='#d33682',
   violet='#6c71c4', blue='#268bd2', cyan='#2aa198', green='#859900',
@@ -31,6 +15,23 @@ Solar <- function(...) {
   hex.cols <- as.character(solarized[color.names])
   return(hex.cols)
 }
+
+# plotting parameters
+width.full <- 6.83
+width.half <- 3.27
+
+breaks.roc <- seq(0, 1, by=0.2)
+breaks.prc <- seq(0, 1, by=0.2)
+ylim.prc <- c(0, 1)
+
+# Colors
+strip.fill <- Solar('base3')
+
+
+'#300A24' # Blackberry (ubuntu terminal)
+'#F8F6F7' # lighter blackberry
+
+
 
 ## Plotting functions
 
@@ -108,4 +109,117 @@ FacetWrapLabeller <- function(gg.plot, label.list=NULL) {
   return(g)
 }
 
+
+
+pathophys.colors <- c('#005200', '#B20000', '#8F008F', '#0000B2', '#E68A00', 'black')
+msig.strip.text <- 'Gene\u2014{MSigDB Collection}\u2014Gene\u2014Disease DWPC'
+
+# AUROC plot helpers
+PerfPlot <- function(gg, ymin.auroc) {
+  gg <- SetGGTheme(gg) +
+  facet_grid(. ~ panel, scales='free_x', space='free_x') +
+  geom_hline(aes(yintercept=0.5), color='grey', linetype='solid') +
+  stat_summary(fun.y='MeanConfInt', geom='line', color='grey', size=11) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) + 
+  xlab(NULL) + ylab('AUROC') +
+  scale_y_continuous(limits=c(ymin.auroc, 1), breaks=seq(0, 1, .2), expand=c(0.03, 0)) +
+  scale_colour_manual(values=pathophys.colors, name='Pathophysiology')
+  return(gg)
+}
+
+NAtoFALSE <- function(vec) {
+  vec[is.na(vec)] <- FALSE
+  return(vec)
+}
+
+AddPanelColumn <- function(auroc.df) {
+  auroc.df$panel <- 'Model'
+  auroc.df[NAtoFALSE(auroc.df$metric == 'Path Count'), 'panel'] <- 'Path Count'
+  auroc.df[NAtoFALSE(auroc.df$metric == 'DWPC (w=0.4)'), 'panel'] <- 'Degree-Weighted Path Count'
+  is.msig.auc <- NAtoFALSE(substr(auroc.df$name, 1, 1) == '{')
+  auroc.df[is.msig.auc, 'panel'] <- msig.strip.text
+  return(auroc.df)
+}
+
+
+MeanConfInt <- function(x) {t.test(x)$conf.int[1:2]}
+
+PlotAUROCs <- function(auroc.df, perm.df) {
+  # Plots to graphics device
+  auroc.df <- AddPanelColumn(auroc.df)
+  ymin.auroc <- min(subset(auroc.df, auroc != 0)$auroc)
+  emdash.size <- 8
+  emdash.perm.size <- 6
+  jitter.width <- 0.3
+  point.size <- 1.75
+
+
+  if (! missing(perm.df)) {
+    perm.df <- AddPanelColumn(perm.df)
+    auroc.df$permuted <- FALSE
+    perm.df$permuted <- TRUE
+		auroc.df <- rbind(auroc.df, subset(perm.df, breadth == 'global'))
+  }
+
+
+  ## MSigDB Plot
+  msig.df <- subset(auroc.df, panel == msig.strip.text | panel == 'Model')
+  msig.df$name <- gsub('[{}]', '', msig.df$name)
+  msig.disease.df <- subset(msig.df, breadth == 'disease_specific')
+  msig.global.df <- subset(msig.df, breadth == 'global')
+  # Order by global AUROC
+  if (! missing(perm.df)) {
+		msig.global.perm.df <- subset(msig.global.df, permuted)
+		msig.global.df <- subset(msig.global.df, ! permuted)
+	}
+  msig.levels <- as.character(msig.global.df$name[order(msig.global.df$auroc)])
+  msig.disease.df$name <- factor(msig.disease.df$name, levels=msig.levels)
+  msig.global.df$name <- factor(msig.global.df$name, levels=msig.levels)
+  if (! missing(perm.df)) {
+		msig.global.perm.df$name <- factor(msig.global.perm.df$name, levels=msig.levels)
+	}
+
+  set.seed(0); msig.plot <- ggplot(msig.disease.df, aes(name, auroc)) 
+  msig.plot <- PerfPlot(msig.plot, ymin.auroc) +
+    geom_point(data=msig.global.df, size=emdash.size, shape='\u2014', color=Solar('base02')) + 
+    geom_point(aes(color=disease_pathophys), position=position_jitter(width=jitter.width), 
+      alpha=0.7, size=point.size, show_guide=FALSE)
+  if (! missing(perm.df)) {
+    msig.plot <- msig.plot + geom_point(data=msig.global.perm.df, 
+      size=emdash.perm.size, shape='\u2014', color=Solar('violet'))
+  }
+
+  ## NonMSigDB Plot
+  nonmsig.df <- subset(auroc.df, panel != msig.strip.text)
+  nonmsig.df$panel <- factor(nonmsig.df$panel, levels=c('Degree-Weighted Path Count', 'Path Count', 'Model'))
+  nonmsig.disease.df <- subset(nonmsig.df, breadth == 'disease_specific' & panel != 'PCt')
+  nonmsig.global.df <- subset(nonmsig.df, breadth == 'global')
+  # Order by global AUROC
+  if (! missing(perm.df)) {
+		nonmsig.global.perm.df <- subset(nonmsig.global.df, permuted)
+		nonmsig.global.df <- subset(nonmsig.global.df, ! permuted)
+	}
+  nonmsig.levels <- unique(as.character(nonmsig.global.df$name[order(nonmsig.global.df$auroc)]))
+  nonmsig.disease.df$name <- factor(nonmsig.disease.df$name, levels=nonmsig.levels)
+  nonmsig.global.df$name <- factor(nonmsig.global.df$name, levels=nonmsig.levels)
+  if (! missing(perm.df)) {
+		nonmsig.global.perm.df$name <- factor(nonmsig.global.perm.df$name, levels=nonmsig.levels)
+	}
+
+
+  set.seed(0); nonmsig.plot <- ggplot(nonmsig.disease.df, aes(name, auroc))
+  nonmsig.plot <- PerfPlot(nonmsig.plot, ymin.auroc) +
+    geom_point(data=nonmsig.global.df, size=emdash.size, shape='\u2014', color=Solar('base02')) + 
+    geom_point(aes(color=disease_pathophys), position=position_jitter(width=jitter.width),
+      alpha=0.7, size=point.size) + 
+    theme(legend.key=element_rect(linetype='blank')) +
+    theme(legend.margin=grid::unit(1, 'points'))
+  if (! missing(perm.df)) {
+    nonmsig.plot <- nonmsig.plot + geom_point(data=nonmsig.global.perm.df, 
+      size=emdash.perm.size, shape='\u2014', color=Solar('violet'))
+  }
+
+  gg = gridExtra::grid.arrange(msig.plot, nonmsig.plot, ncol=1, widths=c(1, 1))
+  return(gg)
+}
 

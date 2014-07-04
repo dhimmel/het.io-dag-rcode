@@ -102,3 +102,85 @@ InitializeNetworkDir <- function(network.dir) {
   }
   return(dirs)
 }
+
+
+
+# AUROCDF Helpers
+auroc.colnames <- c('breadth', 'type', 'name', 'feature', 
+  'metric', 'disease_code', 'disease_name',
+  'positives', 'auroc')
+
+OrderAurocDf <- function(auroc.df, blank.df) {
+  auroc.df <- merge(auroc.df, blank.df, all.x=TRUE, all.y=TRUE)
+  auroc.df <- auroc.df[, match(auroc.colnames, colnames(auroc.df))]
+  return(auroc.df)
+}
+
+ComputeFeatureAUC <- function(feat.df) {
+  apply(feat.df[, feature.names], 2, function(x) VariableThresholdMetrics(x, feat.df$status_int)$auroc)
+}
+
+
+ComputeAUROCDF <- function(feat.perf.df) {
+
+  # Create blank data.frame
+  blank.df <- data.frame(t(rep(NA, length(auroc.colnames))))
+  names(blank.df) <- auroc.colnames
+  blank.df <- blank.df[-1, ]
+
+  # Calculate disease specific AUCs from the global ridge and lasso models
+  auroc.df1 <- rbind(
+  plyr::ddply(feat.perf.df, c('disease_code'), plyr::summarize,
+    'breadth' = 'disease_specific',
+    'type'='model', 'name'='Ridge',
+    'auroc' = VariableThresholdMetrics(ridge, status_int)$auroc,
+    'positives'=sum(status_int)),
+  plyr::ddply(feat.perf.df, c('disease_code'), plyr::summarize,
+    'breadth' = 'disease_specific',
+    'type'='model', 'name'='Lasso',
+    'auroc' = VariableThresholdMetrics(lasso, status_int)$auroc,
+    'positives'=sum(status_int))
+  )
+  auroc.df1 <- OrderAurocDf(auroc.df1, blank.df)
+
+  # Calculate global AUCs for each feature
+  auroc.vec2 <- ComputeFeatureAUC(feat.perf.df)
+  auroc.df2 <- data.frame(
+    'feature'=names(auroc.vec2), 
+    'auroc'=as.numeric(auroc.vec2),
+    'type'='feature',
+    'breadth'='global',
+    'positives'=sum(feat.perf.df$status_int)
+  )
+  auroc.df2 <- OrderAurocDf(auroc.df2, blank.df)
+
+  # Calculate disease-specific AUROCs for each feature
+  fXd.auroc.tab <- plyr::ddply(feat.perf.df, c('disease_code'), ComputeFeatureAUC)
+  auroc.df3 <- reshape2::melt(fXd.auroc.tab, id.vars=c('disease_code'), variable.name='feature', value.name='auroc')
+  auroc.df3 <- cbind(auroc.df3, 'type'='feature', 'breadth'='disease_specific')
+
+
+  # Global AUC for Ridge Model
+  auroc.df4 <- rbind(
+  data.frame('breadth'='global', 'type'='model', 'name'='Ridge',
+    'positives'=sum(feat.perf.df$status_int), 'auroc'=vtm.ridge$auroc),
+  data.frame('breadth'='global', 'type'='model', 'name'='Lasso',
+    'positives'=sum(feat.perf.df$status_int), 'auroc'=vtm.lasso$auroc)
+  )
+  auroc.df4 <- OrderAurocDf(auroc.df4, blank.df)
+
+  # Add positives to auroc.df3
+  auroc.df3$positives <- auroc.df1[match(auroc.df3$disease_code, auroc.df1$disease_code), 'positives']
+  auroc.df3 <- OrderAurocDf(auroc.df3, blank.df)
+
+  # Combine
+  auroc.df <- rbind(auroc.df1, auroc.df2, auroc.df3, auroc.df4)
+  auroc.df$disease_pathophys <- pathophys.df[match(auroc.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+  auroc.df$disease_name <- pathophys.df[match(auroc.df$disease_code, pathophys.df$disease_code), 'disease_name']
+
+  auroc.df$metric <- desc.df[match(auroc.df$feature, desc.df$feature), 'metric']
+  auroc.df[is.na(auroc.df$name), 'name'] <- feature.converter[auroc.df[is.na(auroc.df$name), 'feature']]
+
+  return(auroc.df)
+}
+
