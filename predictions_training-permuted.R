@@ -37,8 +37,8 @@ SaveTest(test.ridge, dirs, suffix='-ridge')
 
 fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
 test.lasso <- TestModel(cv.model=fit.lasso$cv.model, X=X.test, y=y.test)
-SaveFit(fit.lasso, dirs, suffix='-ridge')
-SaveTest(test.lasso, dirs, suffix='-ridge')
+SaveFit(fit.lasso, dirs, suffix='-lasso')
+SaveTest(test.lasso, dirs, suffix='-lasso')
 
 ## Ridge performance
 # ROC

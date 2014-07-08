@@ -50,7 +50,7 @@ TrainModel <- function(X, y, alpha, cores=7, seed=0) {
 }
 
 TestModel <- function(cv.model, X, y) {
-  test <- list()
+  test <- list('X'=X, 'y'=y)
   test$y.predicted <- y.predicted <- as.numeric(
     predict(cv.model, s=cv.model$lambda.1se, newx=X, type='response'))
   test$vtm <- vtm <- VariableThresholdMetrics(y.predicted, y)
@@ -86,6 +86,13 @@ SaveTest <- function(test, dirs, suffix='', digits=5) {
   path <- file.path(dirs$model, sprintf('testing-vtm%s.txt.gz', suffix))
   gz.file <- gzfile(path, 'w')
   formatted.df <- format(test$vtm$threshold.df, digits=digits)
+  write.table(formatted.df, gz.file, sep='\t', row.names=FALSE, quote=FALSE)
+  close(gz.file)
+
+  pred.df <- data.frame('status'=test$y, 'prediction'=test$y.predicted, test$X, check.names=FALSE)
+  path <- file.path(dirs$model, sprintf('testing-predictions%s.txt.gz', suffix))
+  gz.file <- gzfile(path, 'w')
+  formatted.df <- format(pred.df, digits=digits)
   write.table(formatted.df, gz.file, sep='\t', row.names=FALSE, quote=FALSE)
   close(gz.file)
 }
