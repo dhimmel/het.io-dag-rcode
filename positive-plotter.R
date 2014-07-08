@@ -37,23 +37,29 @@ percent.df <- rbind(
   cbind(PercentDF(ridge.df), 'panel'='Ridge'),
   cbind(PercentDF(perm.df), 'panel'='Permuted Ridge'))
 
-
+ratio.df <- subset(percent.df, panel == 'Ridge')
+ratio <- subset(percent.df, panel == 'Ridge')$percent_positive /
+  subset(percent.df, panel == 'Permuted Ridge')$percent_positive
+ratio.df$ratio <- ratio
+ratio.df$fratio <- format(ratio, digits=2)
 
 gg.bar <- ggplot(percent.df, aes(x=quantile, y=percent_positive))
 gg.bar <- SetGGTheme(gg.bar) +
   facet_grid(. ~ panel, scales='free_x') +
   geom_bar(stat='identity', fill=Solar('base01')) +
-  theme(axis.text.x=element_text(angle=60, hjust=1)) +
-  xlab('Prediction (%) Quantile') + ylab('Percent Positive')
-
+  theme(axis.text.x=element_text(angle=35, hjust=1)) +
+  xlab('Prediction (%) Quantile') + ylab('Percent Positive') +
+  geom_text(data=ratio.df, aes(label=fratio), size=3.1, vjust=-0.2) +
+  ylim(c(0, max(percent.df$percent_positive * 1.065)))
+gg.bar
 
 path <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/networks/permuted/140615-0-training/plots/prediction-quantiles.pdf'
-OpenPDF(path, width=width.full, height=3.3)
+OpenPDF(path, width=width.full, height=3)
 print(gg.bar)
 ClosePDF(path)
 
-
 path <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/networks/permuted/140615-0-training/model/prediction-quantiles.txt'
 write.table(percent.df, path, row.names=FALSE, quote=FALSE, sep='\t')
-
+path <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/networks/permuted/140615-0-training/model/prediction-quantile-ratios.txt'
+write.table(ratio.df, path, row.names=FALSE, quote=FALSE, sep='\t')
 
