@@ -306,7 +306,7 @@ MakeFeatureTable <- function(feature.auroc.df) {
     'disease_code'=feature.auroc.df$disease_code,
     'pathophysiology'=feature.auroc.df$disease_pathophys,
     'associations'=feature.auroc.df$positives,
-    'disease_global_auroc'=disease.summary.df[match(feature.auroc.df$disease_code, disease.summary.df$disease_code), 'auroc'],
+    'model_auroc'=disease.summary.df[match(feature.auroc.df$disease_code, disease.summary.df$disease_code), 'auroc'],
     'auroc'=feature.auroc.df$auroc)
   return(feature.table)
 }

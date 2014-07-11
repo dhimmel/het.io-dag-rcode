@@ -77,7 +77,7 @@ roc.df <- rbind(
   cbind(test.lasso$vtm$roc.df, 'part'='test'))
 gg.roc <- ggplot(roc.df, aes(fpr, recall, color=part))
 gg.roc <- ggROC(gg.roc) + geom_path() +
-  scale_color_manual(values=as.character(solarized[c('violet', 'green')]), 
+  scale_color_manual(values=Solar('violet', 'green')), 
     name='Partition (AUROC)', breaks=c('test', 'train'),
     labels=c(sprintf('Testing (%.3f)', test.lasso$vtm$auroc), 
              sprintf('Training (%.3f)', fit.lasso$vtm$auroc)))
