@@ -26,6 +26,11 @@ X.test <- as.matrix(test.df[, feature.names])
 y.train <- train.df$status_int
 y.test <- test.df$status_int
 
+# Calculate auc.df
+auc.df <- ComputeAUCDF(X=X.train, y=y.train, 
+  disease_codes=train.df$disease_code, fit.list=list())
+path <- file.path(dirs$model, 'aucs.txt')
+write.table(auc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
 
 # Fit and test model
 fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
@@ -37,7 +42,6 @@ fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
 test.lasso <- TestModel(cv.model=fit.lasso$cv.model, X=X.test, y=y.test)
 SaveFit(fit.lasso, dirs, suffix='-lasso')
 SaveTest(test.lasso, dirs, suffix='-lasso')
-
 
 # Training and Testing ROC Curves
 

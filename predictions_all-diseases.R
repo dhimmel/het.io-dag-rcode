@@ -19,17 +19,8 @@ dir.create(dirs$webdata, showWarnings=FALSE)
 # Read Features
 feature.df <- ReadFeatures(dirs$features)
 feature.names <- colnames(feature.df)[-(1:8)]
-
-# Read feature descriptions and easy_names
-feature.desc.path <- file.path(project.dir, 'data-integration', 'feature-descriptions.txt')
-desc.df <- read.delim(feature.desc.path)
-feature.converter <- desc.df$easy_name
-names(feature.converter) <- desc.df$feature
-
-# Read pathophysiology
-pathophys.path <- file.path(project.dir, 'data-integration', 'pathophysiology.txt')
-pathophys.df <- read.delim(pathophys.path)
-feature.df$disease_pathophys <- pathophys.df[match(feature.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+feature.df$disease_pathophys <- pathophys.df[
+  match(feature.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
 
 ################################################################################
 ## Fit on all oberservations

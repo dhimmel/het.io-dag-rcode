@@ -1,5 +1,8 @@
 
 CROC <- function(score, status, directory, alpha=7) {
+  # Calculate a condensed ROC curve, using the exponential
+  # transformation to scale the FPR.
+  #
   # Requires CROC and sympy python package installations
   # Online documentation: http://swami.wustl.edu/CROC/
   # Python package https://pypi.python.org/pypi/CROC/
