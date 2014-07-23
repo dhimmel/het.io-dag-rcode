@@ -91,18 +91,117 @@ ms.df$status_post_wtc <- status.post.wtc
 hcp_post_wtc <- subset(ms.df, status_post_wtc == 'HC_primary')[, 'gene_symbol']
 hcs_post_wtc <- subset(ms.df, status_post_wtc == 'HC_secondary')[, 'gene_symbol']
 
-ms.df <- ms.df[order(ms.df$chromosome, ms.df$meta_base_start, ms.df$meta_base_stop), ]
-path <- file.path(project.dir, 'MS-analysis', 'MS-predictions.txt')
-write.table(ms.df, path, quote=FALSE, row.names=FALSE, sep='\t')
 
-# xMHC region defined from doi:10.1038/nrg1489
-xmhc <- ms.df[which(ms.df$gene_symbol == 'SCGN'):which(ms.df$gene_symbol == 'SYNGAP1'), 'gene_symbol']
 
 # WTCCC2 Replicated genes http://wattle.well.ox.ac.uk/wtccc2/external/ms/
 path <- '/home/dhimmels/Documents/serg/gwas/MS/WTCCC2/genes-that-replicated.txt'
 wtc.repl.df <- read.table(path, sep='\t', col.names=c('primary', 'secondary'), fill=TRUE, na.strings='')
 wtc.replicated <- as.character(na.omit(unlist(wtc.repl.df)))
 wtc.replicated <- wtc.replicated[wtc.replicated %in% ms.df$gene_symbol]
+
+
+
+
+CalculatePPA <- function(prior, pval) {
+  # From *Bayesian statistical methods for genetic association studies*
+  # http://dx.doi.org/10.1038/nrg2615
+  #
+  # BF - Bayes Factor
+  # PO - Posterior Odds
+  # PPA - Posterior Probability of Association
+  BF <- -1 / (exp(1) * pval * log(pval))
+  BF[pval > exp(-1)] <- NA
+  PO <- BF * prior / (1 - prior)
+  PPA <- PO / (1 + PO)
+  return(PPA)
+}
+
+ms.df$wtc_ppa_pre_wtc <- CalculatePPA(ms.df$prediction_pre_wtc, ms.df$wtc_p_value)
+ms.df$wtc_ppa_post_wtc <- CalculatePPA(ms.df$prediction_post_wtc, ms.df$wtc_p_value)
+
+ms.df$wtc_ppa_uniform_0.001 <- CalculatePPA(rep(0.001, nrow(ms.df)), ms.df$wtc_p_value)
+
+
+# Calculate blocks
+significant <- ms.df[, 'wtc_p_value'] <= 0.05
+chromosome <- ms.df$chromosome
+chromosome[significant == FALSE] <- NA
+rle.out <- rle(chromosome)
+lengths <- rle.out$lengths
+values <- rle.out$values
+blocks <- 1:length(values)
+ms.df[, 'wtc_block'] <- rep(blocks, times=lengths)
+
+# Save ms.df
+ms.df <- ms.df[order(ms.df$chromosome, ms.df$meta_base_start, ms.df$meta_base_stop), ]
+path <- file.path(project.dir, 'MS-analysis', 'MS-predictions.txt')
+write.table(ms.df, path, quote=FALSE, row.names=FALSE, sep='\t')
+
+# Remove xMHC --- defined from doi:10.1038/nrg1489
+xmhc <- ms.df[which(ms.df$gene_symbol == 'SCGN'):which(ms.df$gene_symbol == 'SYNGAP1'), 'gene_symbol']
+nomhc.df <- subset(ms.df, !(gene_symbol %in% xmhc))
+
+
+
+GetReplicated <- function(threshold, ppa.column) {
+  discovered <- nomhc.df[, ppa.column] >= threshold
+  discovered.blocks <- unique(nomhc.df[discovered, 'wtc_block'])
+  discovery.df <- subset(nomhc.df, wtc_block %in% discovered.blocks)
+  discovered <- plyr::daply(discovery.df, 'wtc_block', function(x) {x[which.max(x[, ppa.column]), 'gene_symbol']})
+  number_discovered=length(discovered)
+
+  replication.df <- subset(nomhc.df, gene_symbol %in% discovered)
+  replication.df$replicated <- replication.df[, 'meta_p_value'] <= 0.05 / number_discovered
+  
+  number_replicated <- sum(replication.df$replicated)
+  data.frame('ppa'=ppa.column, 'number_discovered'=number_discovered,
+    'number_replicated'=number_replicated, 
+    'median_p'=median(replication.df[, 'meta_p_value']))
+  #return(discovered)
+}
+
+ppa_thresholds <- seq(0.01, 0.9999, length.out=50)
+valid.df <- rbind(
+  plyr::adply(ppa_thresholds, 1, GetReplicated,
+    ppa.column='wtc_ppa_post_wtc', .id='ppa_threshold'),
+  plyr::adply(ppa_thresholds, 1, GetReplicated,
+    ppa.column='wtc_ppa_pre_wtc', .id='ppa_threshold'),
+  plyr::adply(ppa_thresholds, 1, GetReplicated,
+    ppa.column='wtc_ppa_uniform_0.001', .id='ppa_threshold')
+)
+
+
+library(ggplot2)
+
+
+ggplot(valid.df, aes(number_discovered, median_p, color=ppa)) +
+  geom_path(aes()) + theme_bw()
+
+
+
+GetReplicated('wtc_ppa_post_wtc', 0.4)
+GetReplicated('wtc_ppa_uniform_0.001', 0.4)
+
+
+
+discovered <- GetReplicated('wtc_ppa_post_wtc', 0.4)
+subset(ms.df, gene_symbol %in% discovered)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Calculated linked genes
 linked <- unique(c(wtc.replicated, hcp_post_wtc))

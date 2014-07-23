@@ -21,50 +21,59 @@ feature.df <- ReadFeatures(dirs$features)
 feature.names <- colnames(feature.df)[-(1:8)]
 feature.df$disease_pathophys <- pathophys.df[
   match(feature.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
+enhance.df <- read.delim(file.path(dirs$model, 'enhancing-features.txt'))
+enhancing.features <- enhance.df[enhance.df$select, 'feature']
 
 ################################################################################
 ## Fit on all oberservations
 
 # Fit on whole data (global)
 X <- as.matrix(feature.df[, feature.names])
+Xe <- as.matrix(feature.df[, enhancing.features])
 y <- feature.df$status_int
 
 X.train <- as.matrix(subset(feature.df, status_int != -1, select=feature.names))
+Xe.train <- as.matrix(subset(feature.df, status_int != -1, select=enhancing.features))
 y.train <- subset(feature.df, status_int != -1)[, 'status_int']
 
 fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
 fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
+fit.select <- TrainModel(X=Xe.train, y=y.train, alpha=0)
 
 SaveFit(fit.ridge, dirs, suffix='-ridge')
 SaveFit(fit.lasso, dirs, suffix='-lasso')
+SaveFit(fit.select, dirs, suffix='-select')
 
 # Create coefficient data.frame
 ridge.coef.df <- GLMNetCoef(fit.ridge$cv.model, X.train, y.train, prepend='ridge_',
   name=c('intercept', feature.converter[feature.names]))
 lasso.coef.df <- GLMNetCoef(fit.lasso$cv.model, X.train, y.train, prepend='lasso_')
-coef.df <- merge(ridge.coef.df, lasso.coef.df)
+select.coef.df <- GLMNetCoef(fit.select$cv.model, Xe.train, y.train, prepend='select_')
+coef.df <- merge(merge(ridge.coef.df, lasso.coef.df), select.coef.df, all=TRUE)
 coef.path <- file.path(dirs$model, 'coefficients.txt')
 write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 # Make predictions using the global model
 feature.df[, 'ridge'] <- MakePredictions(cv.model=fit.ridge$cv.model, X=X)
 feature.df[, 'lasso'] <- MakePredictions(cv.model=fit.lasso$cv.model, X=X)
+feature.df[, 'select'] <- MakePredictions(cv.model=fit.select$cv.model, X=Xe)
 
 # Calculate performance
 vtm.ridge <- fit.ridge$vtm
 vtm.lasso <- fit.lasso$vtm
+vtm.select <- fit.select$vtm
 
 # Save ridge predictions
-prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='ridge')
-predictions.cast.path <- file.path(dirs$model, 'prediction-table.txt')
+prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='select')
+predictions.cast.path <- file.path(dirs$model, 'prediction-table-select.txt')
 write.table(prediction.cast, predictions.cast.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 ## Save XB and make predictions
-XB.mat <- X %*% diag(ridge.coef.df[-1, 'ridge_coef'])
+XB.mat <- X %*% diag(coef.df[-1, 'select_coef'])
 XB.names <- paste('XB|', feature.names, sep='')
 colnames(XB.mat) <- XB.names
 prediction.df <- cbind(feature.df, as.data.frame(XB.mat, check.names=FALSE))
-predictions.file <- gzfile(file.path(dirs$model, 'predictions.txt.gz'), 'w')
+predictions.file <- gzfile(file.path(dirs$model, 'predictions-select.txt.gz'), 'w')
 write.table(prediction.df, predictions.file, sep='\t', row.names=FALSE, quote=FALSE)
 close(predictions.file)
 
@@ -182,18 +191,24 @@ ClosePDF(path)
 ################################################################################
 ## Disease Specific Predictions on global data set
 
-feat.perf.df <- subset(feature.df, status_int != -1)
-auroc.df <- ComputeAUROCDF(feat.perf.df)
-path <- file.path(dirs$model, 'aurocs.txt')
-write.table(auroc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
-auroc.df <- read.delim(path)
+# Compute auc.df
+fit.list <- list('Ridge'=fit.ridge, 'Lasso'=fit.lasso, 'Ridge Select'=fit.select)
+disease_codes <- subset(feature.df, status_int != -1)[, 'disease_code']
+auc.df <- ComputeAUCDF(X=X.train, y=y.train, disease_codes=disease_codes, fit.list=fit.list)
 
+# Save auc.df
+path <- file.path(dirs$model, 'aucs.txt')
+write.table(auc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
+auc.df <- read.delim(path)
+
+# Read permuted auc.df
 path <- file.path(project.dir, 'networks', 'permuted', 'plots', 'AUROCs-permuted.txt')
 auroc.perm.df <- read.delim(path)
 
+# Plot AUROCs
 path <- file.path(dirs$plots, 'AUROC.pdf')
 OpenPDF(path, width=width.full, height=width.full)
-PlotAUROCs(auroc.df, perm.df=auroc.perm.df)
+PlotAUROCs(auc.df, perm.df=auroc.perm.df)
 ClosePDF(path)
 
 

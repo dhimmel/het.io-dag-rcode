@@ -17,20 +17,19 @@ dirs <- InitializeNetworkDir(network.dir)
 # Read Features
 feature.df <- ReadFeatures(dirs$features)
 feature.names <- colnames(feature.df)[-(1:8)]
+enhance.df <- read.delim(file.path(dirs$model, 'enhancing-features.txt'))
+enhancing.features <- enhance.df[enhance.df$select, 'feature']
 
 # Create training and testing datasets
 train.df <- subset(feature.df, part=='train' & status_int != -1)
 test.df <- subset(feature.df, part=='test' & status_int != -1)
 X.train <- as.matrix(train.df[, feature.names])
 X.test <- as.matrix(test.df[, feature.names])
+Xe.train <- as.matrix(train.df[, enhancing.features])
+Xe.test <- as.matrix(test.df[, enhancing.features])
 y.train <- train.df$status_int
 y.test <- test.df$status_int
 
-# Calculate auc.df
-auc.df <- ComputeAUCDF(X=X.train, y=y.train, 
-  disease_codes=train.df$disease_code, fit.list=list())
-path <- file.path(dirs$model, 'aucs.txt')
-write.table(auc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
 
 # Fit and test model
 fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
@@ -42,6 +41,12 @@ fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
 test.lasso <- TestModel(cv.model=fit.lasso$cv.model, X=X.test, y=y.test)
 SaveFit(fit.lasso, dirs, suffix='-lasso')
 SaveTest(test.lasso, dirs, suffix='-lasso')
+
+fit.select <- TrainModel(X=Xe.train, y=y.train, alpha=0)
+test.select <- TestModel(cv.model=fit.select$cv.model, X=Xe.test, y=y.test)
+SaveFit(fit.select, dirs, suffix='-select')
+SaveTest(test.select, dirs, suffix='-select')
+
 
 # Training and Testing ROC Curves
 
@@ -103,5 +108,31 @@ gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
 ClosePDF(path)
 
 
+## Ridge Select performance
+# ROC
+roc.df <- rbind(
+  cbind(fit.select$vtm$roc.df, 'part'='train'),
+  cbind(test.select$vtm$roc.df, 'part'='test'))
+gg.roc <- ggplot(roc.df, aes(fpr, recall, color=part))
+gg.roc <- ggROC(gg.roc) + geom_path() +
+  scale_color_manual(values=as.character(solarized[c('violet', 'green')]), 
+    name='Partition (AUROC)', breaks=c('test', 'train'),
+    labels=c(sprintf('Testing (%.3f)', test.select$vtm$auroc), 
+             sprintf('Training (%.3f)', fit.select$vtm$auroc)))
 
+# Testing Precision-Recall Curve
+prc.df <- PrunePRC(test.select$vtm$threshold.df)
+prc.df$panel <- 'Ridge Select'
+gg.prc <- ggplot(prc.df[nrow(prc.df):1, ], aes(recall, precision, color=threshold))
+gg.prc <- ggPRC(gg.prc) +
+  annotate('text', x=0.7, y=Inf, 
+    label=sprintf('AUPRC == %s', ChrRound(test.select$vtm$auprc, 3)), 
+    hjust=1, vjust=2, parse=TRUE, size=3.5) +
+  facet_grid(panel ~ .)
+
+# Save combined ROC and PRC
+path <- file.path(dirs$plots, 'performance-select.pdf')
+OpenPDF(path, width=width.full, height=2.5)
+gridExtra::grid.arrange(gg.roc, gg.prc, nrow=1, widths=c(1, 1.625))
+ClosePDF(path)
 

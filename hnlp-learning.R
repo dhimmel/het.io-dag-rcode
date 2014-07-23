@@ -214,15 +214,19 @@ ComputeAUCDF <- function(X, y, disease_codes, fit.list) {
   specific.feature.df <- SpecificFeatureAUCDF(X, y, disease_codes)
   specific.feature.df <- OrderAUC(specific.feature.df, blank.df)
 
-  # Combine
+  # Combine and convert factor columns to character
   auc.df <- rbind(global.model.df, specific.model.df, global.feature.df, specific.feature.df)
+  factor.col <- sapply(auc.df, is.factor)
+  auc.df[factor.col] <- lapply(auc.df[factor.col], as.character)
 
+  # Add columns with additional information
   auc.df$disease_pathophys <- pathophys.df[
     match(auc.df$disease_code, pathophys.df$disease_code), 'pathophysiology']
   auc.df$disease_name <- pathophys.df[
     match(auc.df$disease_code, pathophys.df$disease_code), 'disease_name']
   auc.df$metric <- desc.df[match(auc.df$feature, desc.df$feature), 'metric']
-  auc.df[is.na(auc.df$name), 'name'] <- feature.converter[auc.df[is.na(auc.df$name), 'feature']]
+  is.feature <- auc.df$type == 'feature'
+  auc.df[is.feature, 'name'] <- feature.converter[auc.df[is.feature, 'feature']]
 
   return(auc.df)
 }
