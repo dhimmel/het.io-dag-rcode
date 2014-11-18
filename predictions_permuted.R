@@ -45,30 +45,25 @@ y.train <- subset(feature.df, status_int != -1)[, 'status_int']
 
 fit.ridge <- TrainModel(X=X.train, y=y.train, alpha=0)
 fit.lasso <- TrainModel(X=X.train, y=y.train, alpha=1)
-fit.select <- TrainModel(X=Xe.train, y=y.train, alpha=0)
 
 SaveFit(fit.ridge, dirs, suffix='-ridge')
 SaveFit(fit.lasso, dirs, suffix='-lasso')
-SaveFit(fit.select, dirs, suffix='-select')
 
 # Create coefficient data.frame
 ridge.coef.df <- GLMNetCoef(fit.ridge$cv.model, X.train, y.train, prepend='ridge_',
   name=c('intercept', feature.converter[feature.names]))
 lasso.coef.df <- GLMNetCoef(fit.lasso$cv.model, X.train, y.train, prepend='lasso_')
-select.coef.df <- GLMNetCoef(fit.select$cv.model, Xe.train, y.train, prepend='select_')
-coef.df <- merge(ridge.coef.df, lasso.coef.df, select.coef.df)
+coef.df <- merge(ridge.coef.df, lasso.coef.df)
 coef.path <- file.path(dirs$model, 'coefficients.txt')
 write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 # Make predictions using the global model
 feature.df[, 'ridge'] <- MakePredictions(cv.model=fit.ridge$cv.model, X=X)
 feature.df[, 'lasso'] <- MakePredictions(cv.model=fit.lasso$cv.model, X=X)
-feature.df[, 'select'] <- MakePredictions(cv.model=fit.select$cv.model, X=Xe)
 
 # Calculate performance
 vtm.ridge <- fit.ridge$vtm
 vtm.lasso <- fit.lasso$vtm
-vtm.select <- fit.select$vtm
 
 # Save ridge predictions
 prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='ridge')
@@ -159,14 +154,20 @@ ClosePDF(path)
 ################################################################################
 ## Disease Specific Predictions on global data set
 
-feat.perf.df <- subset(feature.df, status_int != -1)
-auroc.df <- ComputeAUROCDF(feat.perf.df)
-path <- file.path(dirs$model, 'aurocs.txt')
-write.table(auroc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
+# Compute auc.df
+fit.list <- list('Ridge'=fit.ridge, 'Lasso'=fit.lasso)
+disease_codes <- subset(feature.df, status_int != -1)[, 'disease_code']
+auc.df <- ComputeAUCDF(X=X.train, y=y.train, disease_codes=disease_codes, fit.list=fit.list)
 
+# Save auc.df
+path <- file.path(dirs$model, 'aucs.txt')
+write.table(auc.df, path, sep='\t', row.names=FALSE, quote=FALSE)
+auc.df <- read.delim(path)
+
+# Plot AUROCs
 path <- file.path(dirs$plots, 'AUROC.pdf')
 OpenPDF(path, width=width.full, height=width.full)
-PlotAUROCs(auroc.df)
+PlotAUROCs(auc.df)
 ClosePDF(path)
 
 }

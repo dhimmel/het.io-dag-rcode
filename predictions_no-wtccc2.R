@@ -85,3 +85,8 @@ gz.file <- gzfile(path, 'w')
 write.table(ms.df, gz.file, sep='\t', row.names=FALSE, quote=FALSE)
 close(gz.file)
 
+# MS Predictions for positives
+novel.pos.df <- subset(ms.df, wtc_novel == 1)[, c('gene_symbol', 'ridge')]
+novel.pos.df <- novel.pos.df[order(novel.pos.df$ridge, decreasing=TRUE), ]
+novel.pos.df$rank <- rank(-novel.pos.df$ridge)
+write.table(novel.pos.df, file.path(dirs$model, 'MS-positive-predictions.txt'), sep='\t', row.names=FALSE, quote=FALSE)

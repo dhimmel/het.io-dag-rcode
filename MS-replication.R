@@ -118,19 +118,21 @@ CalculatePPA <- function(prior, pval) {
 
 ms.df$wtc_ppa_pre_wtc <- CalculatePPA(ms.df$prediction_pre_wtc, ms.df$wtc_p_value)
 ms.df$wtc_ppa_post_wtc <- CalculatePPA(ms.df$prediction_post_wtc, ms.df$wtc_p_value)
-
 ms.df$wtc_ppa_uniform_0.001 <- CalculatePPA(rep(0.001, nrow(ms.df)), ms.df$wtc_p_value)
 
+ms.df$meta_ppa_pre_wtc <- CalculatePPA(ms.df$prediction_pre_wtc, ms.df$meta_p_value)
+ms.df$meta_ppa_post_wtc <- CalculatePPA(ms.df$prediction_post_wtc, ms.df$meta_p_value)
+ms.df$meta_ppa_uniform_0.001 <- CalculatePPA(rep(0.001, nrow(ms.df)), ms.df$meta_p_value)
 
 # Calculate blocks
-significant <- ms.df[, 'wtc_p_value'] <= 0.05
+significant <- ms.df[, 'meta_p_value'] <= 0.05
 chromosome <- ms.df$chromosome
 chromosome[significant == FALSE] <- NA
 rle.out <- rle(chromosome)
 lengths <- rle.out$lengths
 values <- rle.out$values
 blocks <- 1:length(values)
-ms.df[, 'wtc_block'] <- rep(blocks, times=lengths)
+ms.df[, 'meta_block'] <- rep(blocks, times=lengths)
 
 # Save ms.df
 ms.df <- ms.df[order(ms.df$chromosome, ms.df$meta_base_start, ms.df$meta_base_stop), ]
@@ -145,37 +147,37 @@ nomhc.df <- subset(ms.df, !(gene_symbol %in% xmhc))
 
 GetReplicated <- function(threshold, ppa.column) {
   discovered <- nomhc.df[, ppa.column] >= threshold
-  discovered.blocks <- unique(nomhc.df[discovered, 'wtc_block'])
-  discovery.df <- subset(nomhc.df, wtc_block %in% discovered.blocks)
-  discovered <- plyr::daply(discovery.df, 'wtc_block', function(x) {x[which.max(x[, ppa.column]), 'gene_symbol']})
+  discovered.blocks <- unique(nomhc.df[discovered, 'meta_block'])
+  discovery.df <- subset(nomhc.df, meta_block %in% discovered.blocks)
+  discovered <- plyr::daply(discovery.df, 'meta_block', function(x) {x[which.max(x[, ppa.column]), 'gene_symbol']})
   number_discovered=length(discovered)
 
   replication.df <- subset(nomhc.df, gene_symbol %in% discovered)
-  replication.df$replicated <- replication.df[, 'meta_p_value'] <= 0.05 / number_discovered
+  replication.df$replicated <- replication.df[, 'wtc_p_value'] <= 0.05 / number_discovered
   
   number_replicated <- sum(replication.df$replicated)
   data.frame('ppa'=ppa.column, 'number_discovered'=number_discovered,
     'number_replicated'=number_replicated, 
-    'median_p'=median(replication.df[, 'meta_p_value']))
+    'median_p'=median(replication.df[, 'wtc_p_value']))
   #return(discovered)
 }
 
-ppa_thresholds <- seq(0.01, 0.9999, length.out=50)
+ppa_thresholds <- seq(0.01, 0.9999, length.out=300)
 valid.df <- rbind(
   plyr::adply(ppa_thresholds, 1, GetReplicated,
-    ppa.column='wtc_ppa_post_wtc', .id='ppa_threshold'),
+    ppa.column='meta_ppa_post_wtc', .id='ppa_threshold'),
   plyr::adply(ppa_thresholds, 1, GetReplicated,
-    ppa.column='wtc_ppa_pre_wtc', .id='ppa_threshold'),
+    ppa.column='meta_ppa_pre_wtc', .id='ppa_threshold'),
   plyr::adply(ppa_thresholds, 1, GetReplicated,
-    ppa.column='wtc_ppa_uniform_0.001', .id='ppa_threshold')
+    ppa.column='meta_ppa_uniform_0.001', .id='ppa_threshold')
 )
 
 
 library(ggplot2)
 
 
-ggplot(valid.df, aes(number_discovered, median_p, color=ppa)) +
-  geom_path(aes()) + theme_bw()
+ggplot(valid.df, aes(number_discovered, number_replicated, color=ppa)) +
+  geom_path(aes()) + theme_bw() + scale_x_log10()
 
 
 

@@ -1,4 +1,3 @@
-library(glmnet)
 library(ggplot2)
 library(doMC)
 library(grid)
@@ -11,7 +10,7 @@ options(width=Sys.getenv('COLUMNS'))
 project.dir <- '/home/dhimmels/Documents/serg/gene-disease-hetnet/'
 network.dir <- file.path(project.dir, 'networks', '140615-all-assoc')
 
-pred.tab.path <- file.path(network.dir, 'model', 'prediction-table-select.txt')
+pred.tab.path <- file.path(network.dir, 'model', 'prediction-table.txt')
 pred.tab <- read.delim(pred.tab.path, check.names=FALSE, row.names=1)
 
 #pred.table <- log(pred.tab)

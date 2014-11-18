@@ -48,7 +48,7 @@ predictions.pre.wtc.df <- read.delim(predictions.pre.wtc.path, check.names=FALSE
 predictions.pre.wtc.df <- predictions.pre.wtc.df[, c('gene_symbol', 'ridge')]
 colnames(predictions.pre.wtc.df) <- c('gene_symbol', 'prediction_pre_wtc')
 
-predictions.post.wtc.path <- file.path(project.dir, 'networks', global.id, 'modeling', 'prediction-table.txt')
+predictions.post.wtc.path <- file.path(project.dir, 'networks', global.id, 'model', 'prediction-table.txt')
 predictions.post.wtc.df <- read.delim(predictions.post.wtc.path, check.names=FALSE)
 predictions.post.wtc.df <- predictions.post.wtc.df[, c('gene_symbol', 'multiple sclerosis')]
 colnames(predictions.post.wtc.df) <- c('gene_symbol', 'prediction_post_wtc')

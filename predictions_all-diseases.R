@@ -51,7 +51,7 @@ lasso.coef.df <- GLMNetCoef(fit.lasso$cv.model, X.train, y.train, prepend='lasso
 select.coef.df <- GLMNetCoef(fit.select$cv.model, Xe.train, y.train, prepend='select_')
 coef.df <- merge(merge(ridge.coef.df, lasso.coef.df), select.coef.df, all=TRUE)
 coef.path <- file.path(dirs$model, 'coefficients.txt')
-write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE)
+write.table(coef.df, coef.path, sep='\t', row.names=FALSE, quote=FALSE, na='')
 
 # Make predictions using the global model
 feature.df[, 'ridge'] <- MakePredictions(cv.model=fit.ridge$cv.model, X=X)
@@ -64,16 +64,16 @@ vtm.lasso <- fit.lasso$vtm
 vtm.select <- fit.select$vtm
 
 # Save ridge predictions
-prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='select')
-predictions.cast.path <- file.path(dirs$model, 'prediction-table-select.txt')
+prediction.cast <- reshape2::dcast(feature.df, gene_symbol ~ disease_name, value.var='ridge')
+predictions.cast.path <- file.path(dirs$model, 'prediction-table-ridge.txt')
 write.table(prediction.cast, predictions.cast.path, sep='\t', row.names=FALSE, quote=FALSE)
 
 ## Save XB and make predictions
-XB.mat <- X %*% diag(coef.df[-1, 'select_coef'])
+XB.mat <- X %*% diag(coef.df[-1, 'ridge_coef'])
 XB.names <- paste('XB|', feature.names, sep='')
 colnames(XB.mat) <- XB.names
 prediction.df <- cbind(feature.df, as.data.frame(XB.mat, check.names=FALSE))
-predictions.file <- gzfile(file.path(dirs$model, 'predictions-select.txt.gz'), 'w')
+predictions.file <- gzfile(file.path(dirs$model, 'predictions-ridge.txt.gz'), 'w')
 write.table(prediction.df, predictions.file, sep='\t', row.names=FALSE, quote=FALSE)
 close(predictions.file)
 
@@ -192,7 +192,7 @@ ClosePDF(path)
 ## Disease Specific Predictions on global data set
 
 # Compute auc.df
-fit.list <- list('Ridge'=fit.ridge, 'Lasso'=fit.lasso, 'Ridge Select'=fit.select)
+fit.list <- list('Ridge'=fit.ridge, 'Lasso'=fit.lasso)
 disease_codes <- subset(feature.df, status_int != -1)[, 'disease_code']
 auc.df <- ComputeAUCDF(X=X.train, y=y.train, disease_codes=disease_codes, fit.list=fit.list)
 
@@ -217,7 +217,7 @@ ClosePDF(path)
 
 #################
 # Disease Summary Table
-disease.summary.df <- subset(auroc.df, breadth == 'disease_specific' & name == 'Ridge',
+disease.summary.df <- subset(auc.df, breadth == 'disease_specific' & name == 'Ridge',
   select=c('disease_name', 'disease_code', 'disease_pathophys', 'positives', 'auroc'))
 
 colnames(disease.summary.df)[colnames(disease.summary.df) == 'positives'] <- 'associations'
@@ -238,7 +238,7 @@ write.table(gene.summary.df, gene.summary.path, sep='\t', row.names=FALSE, quote
 
 #################
 # Feature Summary Table
-feature.summary.df <- subset(auroc.df, breadth == 'global' & type == 'feature',
+feature.summary.df <- subset(auc.df, breadth == 'global' & type == 'feature',
   select=c('feature', 'name', 'metric', 'auroc'))
 colnames(feature.summary.df)[colnames(feature.summary.df) == 'name'] <- 'metapath'
 feature.summary.df[feature.summary.df$metric == 'PC_s', 'metric'] <- 'Path Count'
@@ -303,21 +303,21 @@ for (gene.code in names(gene.tables)) {
 #################
 # Feature Tables
 dir.create(file.path(dirs$webdata, 'feature-tables'), showWarnings=FALSE)
-fXd.auroc.df <- subset(auroc.df, breadth == 'disease_specific' & type == 'feature')
-fXd.auroc.df$feature <- gsub('|', '_', fXd.auroc.df$feature, fixed=TRUE)
+fXd.auc.df <- subset(auc.df, breadth == 'disease_specific' & type == 'feature')
+fXd.auc.df$feature <- gsub('|', '_', fXd.auc.df$feature, fixed=TRUE)
 
-MakeFeatureTable <- function(feature.auroc.df) {
+MakeFeatureTable <- function(feature.auc.df) {
   feature.table <- data.frame(
-    'disease_name'=feature.auroc.df$disease_name,
-    'disease_code'=feature.auroc.df$disease_code,
-    'pathophysiology'=feature.auroc.df$disease_pathophys,
-    'associations'=feature.auroc.df$positives,
-    'model_auroc'=disease.summary.df[match(feature.auroc.df$disease_code, disease.summary.df$disease_code), 'auroc'],
-    'auroc'=feature.auroc.df$auroc)
+    'disease_name'=feature.auc.df$disease_name,
+    'disease_code'=feature.auc.df$disease_code,
+    'pathophysiology'=feature.auc.df$disease_pathophys,
+    'associations'=feature.auc.df$positives,
+    'model_auroc'=disease.summary.df[match(feature.auc.df$disease_code, disease.summary.df$disease_code), 'auroc'],
+    'auroc'=feature.auc.df$auroc)
   return(feature.table)
 }
 
-feature.tables <- plyr::dlply(fXd.auroc.df, 'feature', MakeFeatureTable)
+feature.tables <- plyr::dlply(fXd.auc.df, 'feature', MakeFeatureTable)
 for (feature in names(feature.tables)) {
   feature.table <- feature.tables[[feature]]
   feature.table <- format(feature.table, digits=2)
@@ -330,7 +330,7 @@ for (feature in names(feature.tables)) {
 #################
 # Coef Tables
 
-coef.match.name.df <- subset(auroc.df, breadth == 'global' & type == 'feature',
+coef.match.name.df <- subset(auc.df, breadth == 'global' & type == 'feature',
   select=c('feature', 'name', 'metric'))
 coef.match.name.df <- coef.match.name.df[match(gsub('XB|', '', XB.names, fixed=TRUE), coef.match.name.df$feature), ]
 

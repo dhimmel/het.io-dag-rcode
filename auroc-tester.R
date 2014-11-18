@@ -45,7 +45,8 @@ CompareROCs <- function(feature) {
 
   test.df <- data.frame(
     'feature'=feature, 'name'=feature.converter[feature],
-    'auroc'=roc1$auc, 'auroc_perm'=roc0$auc, 'p_value'=test$p.value)
+    'auroc'=roc1$auc, 'auroc_perm'=roc0$auc, 'p_value'=test$p.value,
+    row.names=feature)
   return(test.df)
 }
 
@@ -61,6 +62,19 @@ for (directory in c(network.dir, network.perm.dir)) {
   write.table(roctest.df, path, sep='\t', row.names=FALSE, quote=FALSE)
 }
 
+##################################################################################################
+
+# Testing ROC comparison for predictions
+path <- file.path(network.dir, 'model', 'testing-predictions-ridge.txt.gz')
+feature.df <- read.delim(path, check.names=FALSE)
+
+path <- file.path(network.perm.dir, 'model', 'testing-predictions-ridge.txt.gz')
+feature.perm.df <- read.delim(path, check.names=FALSE)
+
+feature.df$status_int <- feature.df$status
+feature.perm.df$network_status <- feature.perm.df$status
+
+testing.roc.df <- CompareROCs('prediction')
 
 ##################################################################################################
 ## All-assoc
