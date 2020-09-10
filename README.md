@@ -11,6 +11,7 @@ DOI: [10.1371/journal.pcbi.1004259](https://doi.org/10.1371/journal.pcbi.1004259
 
 Datasets related to this study are available at <https://github.com/dhimmel/het.io-dag-data>.
 Predictions from this study can be viewed at <https://het.io/disease-genes/>.
+Python code related to this study is available at <https://github.com/dhimmel/het.io-dag-pycode>.
 
 ## Documentation
 
