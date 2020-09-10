@@ -119,6 +119,7 @@ for (primary in linked) {
 exclusions <- unique(c(linked, hcs_post_wtc, xmhc))
 novel.df <- subset(ms.df, ! (gene_symbol %in% exclusions))
 novel.df <- novel.df[order(novel.df$prediction_pre_wtc, decreasing=TRUE), ]
+sum(novel.df$prediction_pre_wtc >= 0.02430711) # novel genes exceeding prediction threshold
 nominal.novel.df <- subset(novel.df, meta_p_value <= 0.05)
 
 BonferroniValidator <- function(pvals, alpha=0.05) {

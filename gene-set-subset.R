@@ -70,6 +70,7 @@ auroc.df$mask_type <- factor(auroc.df$mask_type, levels=c('node', 'edge'))
 
 gg.auroc <- auroc.df %>%
   dplyr::filter(! (mask_type == 'edge' & subset_kind == 'minimum')) %>%
+  dplyr::filter(! (metanode == 'tissue' & subset_kind == 'minimum')) %>%
   dplyr::left_join(msigdb.df %>% dplyr::select(metanode, metanode_name)) %>%
   ggplot(aes(x, auroc)) %>% SetGGTheme() +
   facet_wrap( ~ metanode_name, ncol = 5) +
