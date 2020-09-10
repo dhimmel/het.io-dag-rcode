@@ -84,29 +84,28 @@ close(predictions.file)
 coef.df$neg_ridge_zcoef <- -coef.df$ridge_zcoef
 coef.melt <- reshape2::melt(subset(coef.df, feature != 'intercept'),
   measure.vars=c('neg_ridge_zcoef', 'lasso_zcoef'))
-coef.melt$variable <- factor(coef.melt$variable, levels=c('lasso_zcoef', 'neg_ridge_zcoef'))
 
 coef.melt.ridge <- subset(coef.melt, variable=='neg_ridge_zcoef')
-coef.sorted <- coef.melt.ridge[order(coef.melt.ridge$value, decreasing=FALSE), 'name']
+coef.sorted <- coef.melt.ridge[order(coef.melt.ridge$value, decreasing=TRUE), 'name']
 
 gg.zcoef <- ggplot(coef.melt, aes(x=name, ymin=0, ymax=value, color=variable))
 gg.zcoef <- SetGGTheme(gg.zcoef) +
-  geom_linerange(stat='identity', size=4.5) + 
+  geom_linerange(stat='identity', size=4.2) + 
   geom_hline(yintercept=0, color=Solar('base02')) +
-  #coord_flip() +
+  coord_flip() +
   ylab('Standardized Coefficient') +
   scale_x_discrete(limits=coef.sorted) + 
   scale_y_continuous(labels=abs) +
-  scale_color_manual(name='Method (AUROC)', values=c(Solar('blue'), Solar('red')), 
-    labels=c(sprintf('lasso (%.3f)', vtm.lasso$auroc),
-             sprintf('ridge (%.3f)', vtm.ridge$auroc))) +
+  scale_color_manual(name='Method (AUROC)', values=c(Solar('red'), Solar('blue')), 
+    labels=c(sprintf('ridge (%.3f)', vtm.ridge$auroc), 
+             sprintf('lasso (%.3f)', vtm.lasso$auroc))) +
   theme(legend.key=element_rect(linetype='blank')) +
-  theme(axis.text.x=element_text(angle=45, hjust=1, size=9)) + xlab(NULL) +
-  theme(legend.justification=c(1,1), legend.position=c(1,1), 
+  theme(axis.text.y=element_text(angle=30, hjust=1)) + xlab(NULL) +
+  theme(legend.justification=c(1,0), legend.position=c(1,0), 
     legend.background=element_rect(color='grey60', size=0.2))
 
-path <- file.path(dirs$plots, 'coefficients-horizontal.pdf')
-OpenPDF(path, width=5.25, height=2.8)
+path <- file.path(dirs$plots, 'coefficients.pdf')
+OpenPDF(path, width=width.half, height=4.5)
 print(gg.zcoef)
 ClosePDF(path)
 
